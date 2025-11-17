@@ -19,9 +19,9 @@ DB_PATH = os.path.join(DB_FOLDER, 'stats.db')
 
 # Rollen und Aktionen (für GUI und Validierung)
 ACTION_TYPES = {
-    'Zuspiel': ['Gut', 'Halb', 'Fehler'],
-    'Angriff': ['Kill', 'Halbes', 'Fehler', 'Blockiert'],
-    'Aufschlag': ['Ass', 'Ins Feld', 'Fehler'],
+    'Zuspiel': ['Gut', 'Mittel',"Schlecht", 'Fehler'],
+    'Angriff': ['Kill', 'Halber', 'Fehler', 'Blockiert'],
+    'Aufschlag': ['Ass',"Halbes", 'Ins Feld', 'Fehler'],
     'Block': ['Punkt', 'Fehler']
 }
 
