@@ -1,13 +1,18 @@
+# src/modules/gui/input_view.py
+
 import customtkinter as ctk
 from typing import List, Dict, Optional, Any, Tuple
 from ..logic.game_controller import GameController 
 from .action_dialog import ActionDialog 
 from .confirmation_dialog import ConfirmationDialog
+# Annahme: Import für den neuen Dialog zur Bearbeitung
+from .action_edit_dialog import ActionEditDialog 
 
 class InputView(ctk.CTkFrame):
     """
     Die Hauptansicht zur Live-Erfassung der Volleyball-Statistiken, 
-    mit farblich abwechselnden Spieler-Spalten in einem einzigen Grid.
+    mit farblich abwechselnden Spieler-Spalten und einer separaten 
+    Spalte für die Aktionshistorie.
     """
     # Farben für Zebra-Striping 
     COLOR_LIGHT = ("#dbdbdb", "#2b2b2b")
@@ -25,8 +30,10 @@ class InputView(ctk.CTkFrame):
         self.game_options: Dict[str, int] = {}
         
         # --- GUI-Setup ---
+        
+        # 1. Haupt-Grid Konfiguration (Row 0: Titel/Score, Row 1: Game Selection, Row 2: Content/History)
         self.grid_columnconfigure(0, weight=1) 
-        self.grid_rowconfigure(2, weight=1) # Row 2 (der ScrollFrame) bekommt jetzt das Gewicht
+        self.grid_rowconfigure(2, weight=1) # Row 2 (der Content-Frame) bekommt das Gewicht
         
         # Titel (Row 0)
         title_frame = ctk.CTkFrame(self)
@@ -49,11 +56,25 @@ class InputView(ctk.CTkFrame):
         )
         self.game_selection_menu.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
         
-        # AKTIONS- UND HEADER-FRAME (Row 2) - Alles wird hier platziert
-        self._action_input_frame = ctk.CTkScrollableFrame(self, label_text="") 
-        self._action_input_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10)) # Row 2 erhält weight=1
+        # --- HAUPT-CONTENT-FRAME (Row 2) ---
+        self.main_content_frame = ctk.CTkFrame(self)
+        self.main_content_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
         
-        # Buttons außerhalb des Frames (Row 3, 4) - Reihenfolge angepasst
+        # 2. Grid Konfiguration für CONTENT (Eingabe links, Historie rechts)
+        self.main_content_frame.grid_columnconfigure(0, weight=3) # Eingabefeld ist breiter
+        self.main_content_frame.grid_columnconfigure(1, weight=1) # Historie
+        self.main_content_frame.grid_rowconfigure(0, weight=1)
+        
+        # AKTIONS- UND HEADER-FRAME (Linke Seite)
+        self._action_input_frame = ctk.CTkScrollableFrame(self.main_content_frame, label_text="Aktionen") 
+        self._action_input_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=0) 
+
+        # HISTORIE-FRAME (Rechte Seite)
+        self._history_frame = ctk.CTkScrollableFrame(self.main_content_frame, label_text="Aktionshistorie (Letzte 20)")
+        self._history_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0), pady=0)
+        self._history_frame.grid_columnconfigure(0, weight=1) # Für die Einträge
+        
+        # Buttons außerhalb des Frames (Row 3, 4)
         self._setup_fixed_buttons()
 
         # Initialer Ladevorgang
@@ -79,7 +100,7 @@ class InputView(ctk.CTkFrame):
 
 
     def load_game_options(self):
-        # ... (Methodeninhalt bleibt gleich) ...
+        # ... (Methode bleibt gleich) ...
         all_games = self.db_manager.get_all_games()
         
         options = ["--- Spiel wählen ---"]
@@ -103,7 +124,7 @@ class InputView(ctk.CTkFrame):
             
 
     def load_selected_game_manual(self, selection: str):
-        # ... (Methodeninhalt bleibt gleich) ...
+        # ... (Methode bleibt gleich) ...
         game_id = self.game_options.get(selection)
         
         if game_id:
@@ -120,7 +141,8 @@ class InputView(ctk.CTkFrame):
         
         if not self.game_controller._current_game_id:
             self._clear_dynamic_widgets()
-            self._create_header_and_actions(empty=True) # GEÄNDERT: Header und Aktionen in einer Methode
+            self._clear_history_widgets() 
+            self._create_header_and_actions(empty=True) 
             self.update_score_display()
             return
             
@@ -136,15 +158,21 @@ class InputView(ctk.CTkFrame):
             self._create_header_and_actions() 
         
         self.update_score_display()
+        self.load_action_history() # NEU: Historie laden/aktualisieren
 
 
     def _clear_dynamic_widgets(self):
-        """Löscht die Widgets im einzigen ScrollableFrame."""
+        """Löscht die Widgets im Aktions-ScrollableFrame."""
         for widget in self._action_input_frame.winfo_children():
             widget.destroy()
-            
-   # src/modules/gui/input_view.py (Ausschnitt der Methode _create_header_and_actions)
 
+    def _clear_history_widgets(self):
+        """Löscht die Widgets im Historie-ScrollableFrame."""
+        for widget in self._history_frame.winfo_children():
+            widget.destroy()
+            
+            
+    # src/modules/gui/input_view.py (Ausschnitt der Methode _create_header_and_actions)
     def _create_header_and_actions(self, empty: bool = False):
         """Erstellt Header und Aktionen im SELBEN Grid."""
         input_frame = self._action_input_frame
@@ -160,7 +188,6 @@ class InputView(ctk.CTkFrame):
             return
         
         # --- 2. HEADER-ZEILE (Row 0) ---
-        # ... (Logik zur Erstellung des Headers bleibt gleich, verwendet padx=0) ...
         action_header_label = ctk.CTkLabel(input_frame, text="Aktion", font=("Arial", 12, "bold"), fg_color=self.COLOR_DARK, anchor="center")
         action_header_label.grid(row=0, column=0, padx=0, pady=(5, 0), sticky="ew") 
         
@@ -191,7 +218,6 @@ class InputView(ctk.CTkFrame):
                 bg_frame = ctk.CTkFrame(input_frame, fg_color=bg_color, corner_radius=0)
                 bg_frame.grid(row=current_row, column=col_idx + 1, padx=0, pady=(0, 0), sticky="nsew") 
                 
-                # KRITISCHE ÄNDERUNG: Button mit Grid im bg_frame platzieren
                 # Führe ein internes Grid-Layout im bg_frame ein
                 bg_frame.grid_columnconfigure(0, weight=1) 
                 bg_frame.grid_rowconfigure(0, weight=1)
@@ -202,10 +228,82 @@ class InputView(ctk.CTkFrame):
                     width=40, height=20,
                     command=lambda p_id=player_id, a_name=action_name: self.handle_action(p_id, a_name)
                 )
-                # Verwende grid() mit padding, um Abstand zum Rand des bg_frame zu schaffen
-                # padx=4 sorgt für einen 4-Pixel-Abstand an jedem Rand innerhalb der farbigen Spalte.
-                # Dies erzeugt visuell die Trennung zwischen den Buttons.
                 button.grid(row=0, column=0, padx=4, pady=2)
+
+    def load_action_history(self):
+        """Lädt die letzten Aktionen aus dem GameController und zeigt sie an."""
+        self._clear_history_widgets()
+        
+        if not self.game_controller._current_game_id:
+            ctk.CTkLabel(self._history_frame, text="Kein Spiel aktiv.").grid(row=0, column=0, padx=10, pady=10, sticky="w")
+            return
+
+        # Annahme: Der GameController hat eine Methode get_latest_actions()
+        # Tupel-Struktur: (action_id, set_number, time, executor_name, action_type, result_type, point_for)
+        latest_actions = self.game_controller.get_latest_actions(limit=20) 
+
+        if not latest_actions:
+            ctk.CTkLabel(self._history_frame, text="Keine Aktionen erfasst.").grid(row=0, column=0, padx=10, pady=10, sticky="w")
+            return
+            
+        # Header für die Historie (Row 0)
+        ctk.CTkLabel(self._history_frame, text="ID | Zeit | Aktion | Punkt", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=5, pady=(5, 0), sticky="ew")
+        
+        for idx, action in enumerate(latest_actions):
+            action_id, set_num, time, executor_name, action_type, result_type, point_for = action
+            
+            # Formatierung des Punkt-Feldes
+            point_display = "-> UNS" if point_for == 'OWN' else ("-> OPP" if point_for == 'OPP' else "")
+            
+            # Zusammenfassung der Aktion
+            action_summary = f"[{set_num}] {action_type} ({result_type or ''}) durch {executor_name}"
+            
+            # Frame für den Eintrag (enthält Label und Button)
+            entry_frame = ctk.CTkFrame(self._history_frame, fg_color="transparent")
+            entry_frame.grid(row=idx + 1, column=0, sticky="ew", pady=2, padx=5)
+            entry_frame.grid_columnconfigure(0, weight=1) # Label bekommt den Platz
+            entry_frame.grid_columnconfigure(1, weight=0) # Button ist fix
+            
+            # Label mit Zeit und Zusammenfassung
+            label_text = f"[{time[-8:]}] {action_summary} {point_display}"
+            ctk.CTkLabel(entry_frame, text=label_text, anchor="w", justify="left").grid(row=0, column=0, sticky="ew")
+
+            # Bearbeiten Button
+            ctk.CTkButton(
+                entry_frame, 
+                text="✎", 
+                width=30, height=20,
+                command=lambda a_id=action_id: self.show_edit_dialog(a_id)
+            ).grid(row=0, column=1, sticky="e", padx=(5, 0))
+
+    # src/modules/gui/input_view.py (Ausschnitt der Methode show_edit_dialog)
+
+    def show_edit_dialog(self, action_id: int):
+        """Öffnet den Bearbeitungsdialog für die ausgewählte Aktion."""
+        
+        action_details = self.game_controller.get_action_details(action_id)
+        
+        if not action_details:
+            print(f"Fehler: Details für Aktion ID {action_id} nicht gefunden.")
+            return
+
+        # VORHER: Der Dialog musste den Controller über master.master selbst finden.
+        # NEU: Wir übergeben den Controller direkt.
+        ActionEditDialog(
+            master=self.master.master, 
+            app_controller=self.app_controller,  # <--- HIER IST DIE WICHTIGE ÄNDERUNG
+            action_id=action_id,
+            details=action_details, 
+            players=self.players, 
+            callback=self.process_edit_action
+        )
+    def process_edit_action(self, success: bool):
+        """Callback nach Bearbeitung oder Löschung einer Aktion."""
+        if success:
+            print("Aktion erfolgreich bearbeitet/gelöscht. Daten neu laden.")
+            # Lädt Daten, Historie und Punktestand neu
+            self.load_game_data() 
+
     def end_game_confirmation(self):
         """Zeigt einen Bestätigungsdialog vor dem Beenden des Spiels."""
         from .confirmation_dialog import ConfirmationDialog
@@ -262,9 +360,11 @@ class InputView(ctk.CTkFrame):
         target_id: Optional[int] = None
     ):
         """
-        Empfängt die vollständigen Aktionsdaten und speichert sie über den GameController.
-        Wird vom ActionDialog als Callback aufgerufen.
+        Empfängt die vollständigen Aktionsdaten, speichert sie und 
+        prüft, ob ein Folge-Dialog (Angriff) geöffnet werden muss (verzögert).
         """
+        
+        # 1. Daten aus dem Dialog-Dictionary extrahieren (falls vorhanden)
         if isinstance(executor_id, dict):
             data = executor_id
             executor_id = data.get('executor_id')
@@ -272,6 +372,7 @@ class InputView(ctk.CTkFrame):
             result_type = data.get('result_type')
             target_id = data.get('target_id')
         
+        # 2. Aktion speichern
         success = self.game_controller.process_action(
             executor_id=executor_id, 
             action_type=action_type, 
@@ -281,6 +382,13 @@ class InputView(ctk.CTkFrame):
         
         if success:
             self.update_score_display()
+            self.load_action_history() # Historie nach jeder Aktion aktualisieren
+            
+            # 3. PRÜFUNG AUF FOLGE-AKTION (Angriff nach Zuspiel)
+            if action_type == "Zuspiel" and target_id is not None:
+                
+                # FIX: Verwende self.after(ms, func) zur Verzögerung, um TclError zu vermeiden
+                self.after(10, lambda: self.show_result_dialog(executor_id=target_id, action_name="Angriff"))
 
     def update_score_display(self):
         """

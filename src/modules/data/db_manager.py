@@ -317,3 +317,62 @@ class DBManager:
         except Exception as e:
             print(f"Fehler beim Aktualisieren des Spielers: {e}")
             return False
+        
+    def get_action_data_by_id(self, action_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Holt alle Spalten einer Aktion basierend auf der action_id für den Bearbeitungsdialog.
+        """
+        query = """
+        SELECT action_id, set_id, action_type, executor_player_id, 
+               result_type, target_player_id, point_for, timestamp
+        FROM actions 
+        WHERE action_id = ?
+        """
+        try:
+            self.connect()
+            self._cursor.execute(query, (action_id,))
+            result = self._cursor.fetchone()
+            
+            if not result:
+                self.close()
+                return None
+            
+            # Ordne die Werte den Spaltennamen zu (Wichtig für Dictionary-Rückgabe)
+            columns = [desc[0] for desc in self._cursor.description]
+            data = dict(zip(columns, result))
+            self.close()
+            return data
+            
+        except Exception as e:
+            print(f"Fehler beim Holen der Aktionsdetails: {e}")
+            self.close()
+            return None    
+    # src/modules/data/db_manager.py (Zusätzlich zur bestehenden Klasse)
+
+    def update_action_data(self, action_id: int, executor_id: int, result_type: str, target_id: Optional[int]) -> bool:
+        """
+        Aktualisiert die Kerndaten einer Aktion.
+        """
+        query = """
+            UPDATE actions 
+            SET executor_player_id = ?, result_type = ?, target_player_id = ? 
+            WHERE action_id = ?
+        """
+        # target_id muss NULL sein, wenn None
+        target_id_db = target_id if target_id is not None else None
+        
+        return self.execute_query(query, (executor_id, result_type, target_id_db, action_id))
+
+    def delete_action_data(self, action_id: int) -> bool:
+        """
+        Löscht eine Aktion aus der Datenbank.
+        """
+        query = "DELETE FROM actions WHERE action_id = ?"
+        return self.execute_query(query, (action_id,))
+
+    def update_set_scores(self, set_id: int, score_own: int, score_opponent: int) -> bool:
+        """
+        Aktualisiert die gespeicherten Scores für einen Satz.
+        """
+        query = "UPDATE sets SET score_own = ?, score_opponent = ? WHERE set_id = ?"
+        return self.execute_query(query, (score_own, score_opponent, set_id))

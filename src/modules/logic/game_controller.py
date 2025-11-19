@@ -242,3 +242,100 @@ class GameController:
             print(f"Spiel {game_id} Kontext geladen. Setz-Nr.: {self._current_set.set_number}, Spieler-IDs: {self._active_player_ids}")
         else:
              print(f"Fehler: Heim-Team für Spiel {game_id} nicht gefunden.")
+             
+    # src/modules/logic/game_controller.py (Zusätzlich zur bestehenden Klasse)
+
+    def get_action_details(self, action_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Holt die Details einer einzelnen Aktion zur Bearbeitung aus der DB.
+        """
+        return self.db_manager.get_action_data_by_id(action_id)
+
+    def get_latest_actions(self, limit: int = 20) -> List[Tuple]:
+        """
+        Holt die letzten Aktionen des aktiven Satzes/Spiels für die Historie.
+        Tupel-Struktur: (action_id, set_number, time, executor_name, action_type, result_type, point_for)
+        """
+        if not self._current_set:
+            return []
+        
+        # Abfrage muss die benötigten Felder liefern: 
+        query = """
+        SELECT a.action_id, s.set_number, SUBSTR(a.timestamp, 12, 8), p.name, 
+               a.action_type, a.result_type, a.point_for
+        FROM actions a
+        JOIN sets s ON a.set_id = s.set_id
+        LEFT JOIN players p ON a.executor_player_id = p.player_id
+        WHERE s.game_id = ? 
+        ORDER BY a.action_id DESC 
+        LIMIT ?
+        """
+        params = (self._current_set.game_id, limit) 
+        
+        return self.db_manager.execute_query_fetch_all(query, params)
+
+    def _recalculate_set_score(self, set_id: int) -> bool:
+        """
+        BERECHNET den Punktestand eines Satzes neu, indem alle Aktionen im Satz gezählt werden.
+        Wird nach Bearbeitung oder Löschung aufgerufen.
+        """
+        # 1. Alle Aktionen des Satzes holen
+        query = "SELECT point_for FROM actions WHERE set_id = ?"
+        points = self.db_manager.execute_query_fetch_all(query, (set_id,))
+        
+        if not points:
+            new_score_own, new_score_opp = 0, 0
+        else:
+            new_score_own = sum(1 for p in points if p[0] == 'OWN')
+            new_score_opp = sum(1 for p in points if p[0] == 'OPP')
+
+        # 2. Score in der Datenbank aktualisieren
+        self.db_manager.update_set_scores(set_id, new_score_own, new_score_opp)
+        
+        # 3. Wenn es der aktive Satz ist, den internen Zustand aktualisieren
+        if self._current_set and self._current_set.set_id == set_id:
+            self._current_set.score_own = new_score_own
+            self._current_set.score_opponent = new_score_opp
+            
+        print(f"Satz {set_id} Score neu berechnet: {new_score_own} - {new_score_opp}")
+        return True
+
+    def update_action(self, updated_data: Dict[str, Any]) -> bool:
+        """
+        Aktualisiert eine bestehende Aktion und löst die Neuberechnung des Scores aus.
+        """
+        action_id = updated_data['action_id']
+        old_details = self.get_action_details(action_id)
+        
+        if not old_details:
+            return False
+
+        # 1. Kerndaten der Aktion aktualisieren
+        success = self.db_manager.update_action_data(
+            action_id=action_id,
+            executor_id=updated_data['executor_id'],
+            result_type=updated_data['result_type'],
+            target_id=updated_data['target_id']
+        )
+        
+        if success:
+            # 2. Score neu berechnen, da sich die Aktion oder der Punktwert geändert haben könnte
+            return self._recalculate_set_score(old_details['set_id'])
+        return False
+
+    def delete_action(self, action_id: int) -> bool:
+        """
+        Löscht eine Aktion und löst die Neuberechnung des Scores aus.
+        """
+        old_details = self.get_action_details(action_id)
+        
+        if not old_details:
+            return False
+
+        # 1. Aktion löschen
+        success = self.db_manager.delete_action_data(action_id)
+        
+        if success:
+            # 2. Score neu berechnen
+            return self._recalculate_set_score(old_details['set_id'])
+        return False         
