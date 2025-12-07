@@ -6,7 +6,7 @@ from ..logic.game_controller import GameController
 from .action_dialog import ActionDialog 
 from .confirmation_dialog import ConfirmationDialog
 from .action_edit_dialog import ActionEditDialog 
-# NEUE IMPORTE FÜR PUNKTDETAILS (Annahme: diese existieren im Dateisystem)
+# NEUE IMPORTE FÜR PUNKTDETAILS
 from .point_detail_dialog import PointDetailDialog 
 from ..config import POINT_DETAIL_OUTCOMES 
 
@@ -121,9 +121,10 @@ class InputView(ctk.CTkFrame):
         result_type = result_data.get('result_type')
         
         # Logik, die bestimmt, ob es sich um eine punktbringende Aktion handelt:
-        # Hier ist eine Annahme: Alle 'Kill', 'Ass', 'Punkt' (Block) führen zu Punkt-Details.
+        # HINWEIS: Hier prüfen wir nur auf die RESULT-Typen, die zu OWN/OPP-Punkten führen
         point_resulting_results = ['Kill', 'Ass', 'Punkt'] 
 
+        # Wir prüfen nur, wenn die Aktion im GameController überhaupt einen Punkt auslösen würde
         is_point_action = result_type in point_resulting_results 
         
         if is_point_action:
@@ -132,14 +133,12 @@ class InputView(ctk.CTkFrame):
             
             # Öffne den neuen Detail-Dialog
             PointDetailDialog(
-                # master muss die Top-Level-App sein, um Modalität zu gewährleisten
                 master=self.master.master, 
                 action_type=action_type,
                 callback=self.on_point_details_received
             )
         else:
             # Keine Punkt-Details erforderlich, Aktion direkt verarbeiten
-            # Muss process_final_action aufrufen, da handle_action diese Methode erwartet
             self.process_final_action(result_data)
             
     def on_point_details_received(self, point_detail_code: str):
@@ -194,7 +193,7 @@ class InputView(ctk.CTkFrame):
 
         self.game_selection_menu.configure(values=options)
         
-        current_game_id = self.game_controller._current_game_id
+        current_game_id = self.game_controller.get_current_game_id()
         if current_game_id:
             current_name = next((name for name, id in self.game_options.items() if id == current_game_id), options[0])
             self.game_selection_var.set(current_name)
@@ -451,24 +450,44 @@ class InputView(ctk.CTkFrame):
     def handle_action(self, executor_id: int, action_name: str):
         """
         Sendet Aktionen entweder direkt oder über einen Dialog an den GameController.
-        Wenn "Angriff", "Aufschlag" oder "Zuspiel" -> ActionDialog.
+        Kritische Punkte-Aktionen (Kill, Block) umgehen den ActionDialog,
+        müssen aber den PointDetailDialog auslösen.
         """
-        if action_name == "Kill":
-            # Direkt zum Prozess, da Kill ein Resultat von Angriff ist
-            self.process_final_action(executor_id=executor_id, action_type="Angriff", result_type="Kill")
-            return
-        elif action_name == "Unser Punkt":
-            self.process_final_action(executor_id=0, action_type="Unser Punkt", result_type=None)
-            return
-        elif action_name == "Block":
-            self.process_final_action(executor_id=executor_id, action_type="Block", result_type="Punkt")
-            return
         
-        if action_name in ["Angriff", "Aufschlag", "Zuspiel"]:
-            self.show_result_dialog(executor_id, action_name)
+        # --- 1. DIREKTE PUNKTE-AKTIONEN (müssen Detail-Dialog auslösen) ---
+        if action_name == "Kill":
+            # Erstelle die Datenstruktur für den Detail-Checker
+            result_data = {
+                "executor_id": executor_id,
+                "action_type": "Angriff", 
+                "result_type": "Kill",
+                "target_id": None
+            }
+            self.on_action_details_received(result_data)
             return
 
-    # src/modules/gui/input_view.py (INNERHALB DER KLASSE InputView)
+        elif action_name == "Block":
+            # Erstelle die Datenstruktur für den Detail-Checker
+            result_data = {
+                "executor_id": executor_id,
+                "action_type": "Block",
+                "result_type": "Punkt",
+                "target_id": None
+            }
+            self.on_action_details_received(result_data)
+            return
+
+        # --- 2. SPEZIALFALL: Unser Punkt (geht direkt zur finalen Verarbeitung) ---
+        elif action_name == "Unser Punkt":
+            # Unser Punkt benötigt keine weiteren Details und löst den finalen Prozess aus
+            self.process_final_action(executor_id=0, action_type="Unser Punkt", result_type=None)
+            return
+        
+        # --- 3. AKTIONEN MIT ZWISCHEN-DIALOG (Angriff, Aufschlag, Zuspiel) ---
+        if action_name in ["Angriff", "Aufschlag", "Zuspiel"]:
+            # Ruft den ActionDialog auf, dessen Callback on_action_details_received ist
+            self.show_result_dialog(executor_id, action_name)
+            return
 
     def show_result_dialog(self, executor_id: int, action_name: str):
         """Öffnet einen Dialog, um das Ergebnis einer Aktion abzufragen."""
@@ -479,7 +498,19 @@ class InputView(ctk.CTkFrame):
             executor_id=executor_id,
             action_name=action_name,
             players=self.players,
-            callback=self.on_action_details_received  # <--- KRITISCH: RUFT DEN CHECKER AUF
+            callback=self.on_action_details_received # <--- Stellt sicher, dass dies die neue Kette auslöst
+        )
+
+    def show_result_dialog(self, executor_id: int, action_name: str):
+        """Öffnet einen Dialog, um das Ergebnis einer Aktion abzufragen."""
+        from .action_dialog import ActionDialog 
+        
+        ActionDialog(
+            master=self.master.master, 
+            executor_id=executor_id,
+            action_name=action_name,
+            players=self.players,
+            callback=self.on_action_details_received  # <--- HIER IST DIE KORREKTUR
         )
         
     def process_final_action(self, 
@@ -505,7 +536,6 @@ class InputView(ctk.CTkFrame):
             point_detail_type = data.get('point_detail_type') # NEU
         
         # 2. Aktion speichern und den Satzende-Status abfangen
-        # HINWEIS: GameController.process_action MUSS jetzt point_detail_type akzeptieren.
         success, is_set_over = self.game_controller.process_action(
             executor_id=executor_id, 
             action_type=action_type, 
@@ -555,3 +585,4 @@ class InputView(ctk.CTkFrame):
                 self.load_game_data() 
         else:
             print("Satzende abgelehnt. Weiterspielen in diesem Satz.")
+            

@@ -131,29 +131,41 @@ class GameController:
                 
         return False
         
+    # src/modules/logic/game_controller.py (INNERHALB DER KLASSE GameController)
+
     def process_action(self, executor_id: int, action_type: str, result_type: Optional[str] = None, target_id: Optional[int] = None, point_detail_type: Optional[str] = None) -> Tuple[bool, bool]:
         """
         Verarbeitet eine Aktion, speichert sie und aktualisiert den Spielstand.
         Gibt zurück: (success: bool, is_set_over: bool)
         
-        HINWEIS: Die Signatur wurde korrigiert und enthält nun 'point_detail_type'.
+        HINWEIS: Die Logik wurde korrigiert, um point_detail_type zu priorisieren.
         """
         if not self._current_set or self._current_game_id is None:
             print("Fehler: Kein aktiver Satz oder Spiel gefunden.")
             return False, False
 
-        # --- LOGIK ZUR ERMITTLUNG VON POINT_FOR ---
+        # --- LOGIK ZUR ERMITTLUNG VON POINT_FOR (KORRIGIERT) ---
         point_for = None
         
-        # 1. Spezialfall: "Unser Punkt"
-        if action_type == "Unser Punkt":
+        # 1. Wenn Punkt-Details vorhanden sind, verwenden wir diese zur Zuweisung.
+        if point_detail_type:
+            # Wir verwenden die Codes, um die Punktrichtung zu bestimmen.
+            if point_detail_type in ["P_ATTACK", "P_BLOCK", "P_OPP_FLOOR_ERR", "S_OWN_SAVE"]:
+                # P_ATTACK, P_BLOCK, P_OPP_FLOOR_ERR (Gegner Fehler) sind Punkte für uns
+                point_for = 'OWN'
+            elif point_detail_type in ["P_OWN_FLOOR_ERR", "S_OPP_SAVE"]:
+                # P_OWN_FLOOR_ERR (Eigener Fehler) ist ein Punkt für den Gegner
+                point_for = 'OPP'
+                
+            # HINWEIS: S_OWN_SAVE und S_OPP_SAVE sollten keine Punkte auslösen, 
+            # sind hier aber zur späteren Analyse als 'OWN'/'OPP' eingetragen, 
+            # da der Dialog nur bei PUNKTE-relevanten Aktionen erscheint.
+
+        # 2. Fallback für den "Unser Punkt"-Button (der keinen Detail-Dialog nutzt)
+        elif action_type == "Unser Punkt":
             point_for = POINT_MAPPING.get(("Unser Punkt", "Unser Punkt"))
-        
-        # 2. Normaler Fall: Prüfe über das POINT_MAPPING
-        elif result_type and action_type in ACTION_TYPES.keys():
-            point_for = POINT_MAPPING.get((result_type, action_type))
             
-        # 3. Wenn point_for None, bleibt es None.
+        # 3. Ansonsten bleibt point_for None (kein direkter Punkt)
 
         # 1. Internen Score-Zähler aktualisieren
         if point_for == 'OWN':
@@ -169,10 +181,9 @@ class GameController:
             result_type=result_type,
             target_player_id=target_id,
             point_for=point_for,
-            point_detail_type=point_detail_type # NEU: Übergabe an Action-Modell
+            point_detail_type=point_detail_type
         )
         
-        # HINWEIS: Die insert_action Methode muss jetzt point_detail_type im DBManager unterstützen.
         action_id = self.db_manager.insert_action(action_data, fetch_id=True) 
         
         if action_id:
