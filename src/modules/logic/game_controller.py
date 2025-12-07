@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Tuple, Any
 import datetime
 from ..data.db_manager import DBManager
 from ..data.models import Action, Set
-from ..config import POINT_FOR # Importiere die definierten Konstanten
+from ..config import POINT_FOR, POINT_MAPPING, ACTION_TYPES
 
 class GameController:
     """
@@ -40,11 +40,9 @@ class GameController:
     def start_new_game(self, own_team_id: int, opponent_name: str) -> int:
         """Erstellt Gegner-Team, startet Spiel und den ersten Satz. Gibt die ECHTE Game ID zurück."""
         
-        opponent_team_id = self.db_manager.insert_team(opponent_name) 
+        opponent_team_id = self.db_manager.insert_team(opponent_name)
         if not opponent_team_id:
-              # Annahme: Team existierte bereits oder Fehler.
-              # Wir nehmen hier einen Dummy an, sollte in realer App robust sein.
-              opponent_team_id = 99 
+            opponent_team_id = 99 
         
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         query = "INSERT INTO games (date_time, home_team_id, guest_team_id) VALUES (?, ?, ?)"
@@ -56,8 +54,8 @@ class GameController:
         ) 
         
         if not game_id:
-              raise Exception("Fehler: Konnte keine Game ID von der Datenbank erhalten.")
-              
+            raise Exception("Fehler: Konnte keine Game ID von der Datenbank erhalten.")
+            
         self._current_game_id = game_id 
 
         self.start_new_set(self._current_game_id) 
@@ -101,7 +99,7 @@ class GameController:
         self._current_set = None
 
     def update_score(self, point_for: str):
-        """Aktualisiert den Punktestand des aktuellen Satzes."""
+        """DEPRECATED: Direkter Score-Update jetzt in process_action integriert."""
         if not self._current_set:
             print("Fehler: Kein Satz aktiv.")
             return
@@ -116,45 +114,103 @@ class GameController:
         self.db_manager.execute_query(query, (self._current_set.score_own, self._current_set.score_opponent, self._current_set.set_id))
 
     # --- AKTION UND FILTERUNG ---
-
-    def process_action(self, executor_id: int, action_type: str, result_type: Optional[str] = None, target_id: Optional[int] = None):
-        """
-        Erstellt und speichert eine neue Aktion in der Datenbank und 
-        aktualisiert gegebenenfalls den Punktestand.
-        """
+    
+    def check_set_end_condition(self) -> bool:
+        """Prüft, ob die Volleyball-Regel für das Satzende erfüllt ist (>= 25 Punkte und >= 2 Punkte Vorsprung)."""
         if not self._current_set:
-            print("FEHLER: Aktion kann nicht verarbeitet werden, da kein Satz aktiv ist.")
             return False
-
-        point_for: Optional[str] = None
-        
-        if result_type in ['Ass', 'Kill', 'Punkt'] or action_type == 'Unser Punkt':
-            point_for = POINT_FOR['Eigenes Team']
-        elif result_type in ['Fehler', 'Blockiert']:
-            point_for = POINT_FOR['Gegner']
             
-        # Action-Objekt erstellen
-        new_action = Action(
+        score_own = self._current_set.score_own
+        score_opponent = self._current_set.score_opponent
+        
+        # Mindestens ein Team muss 25 Punkte erreicht haben
+        if score_own >= 25 or score_opponent >= 25:
+            # Vorsprung muss mindestens 2 Punkte betragen
+            if abs(score_own - score_opponent) >= 2:
+                return True
+                
+        return False
+        
+    def process_action(self, executor_id: int, action_type: str, result_type: Optional[str] = None, target_id: Optional[int] = None, point_detail_type: Optional[str] = None) -> Tuple[bool, bool]:
+        """
+        Verarbeitet eine Aktion, speichert sie und aktualisiert den Spielstand.
+        Gibt zurück: (success: bool, is_set_over: bool)
+        
+        HINWEIS: Die Signatur wurde korrigiert und enthält nun 'point_detail_type'.
+        """
+        if not self._current_set or self._current_game_id is None:
+            print("Fehler: Kein aktiver Satz oder Spiel gefunden.")
+            return False, False
+
+        # --- LOGIK ZUR ERMITTLUNG VON POINT_FOR ---
+        point_for = None
+        
+        # 1. Spezialfall: "Unser Punkt"
+        if action_type == "Unser Punkt":
+            point_for = POINT_MAPPING.get(("Unser Punkt", "Unser Punkt"))
+        
+        # 2. Normaler Fall: Prüfe über das POINT_MAPPING
+        elif result_type and action_type in ACTION_TYPES.keys():
+            point_for = POINT_MAPPING.get((result_type, action_type))
+            
+        # 3. Wenn point_for None, bleibt es None.
+
+        # 1. Internen Score-Zähler aktualisieren
+        if point_for == 'OWN':
+            self._current_set.score_own += 1
+        elif point_for == 'OPP':
+            self._current_set.score_opponent += 1
+
+        # 2. Aktion in DB speichern 
+        action_data = Action(
             set_id=self._current_set.set_id,
+            action_type=action_type, 
             executor_player_id=executor_id,
-            action_type=action_type,
             result_type=result_type,
             target_player_id=target_id,
             point_for=point_for,
-            timestamp=datetime.datetime.now()
+            point_detail_type=point_detail_type # NEU: Übergabe an Action-Modell
         )
         
-        self.db_manager.insert_action(new_action)
+        # HINWEIS: Die insert_action Methode muss jetzt point_detail_type im DBManager unterstützen.
+        action_id = self.db_manager.insert_action(action_data, fetch_id=True) 
         
-        if point_for:
-            self.update_score(point_for)
+        if action_id:
+            # 3. Satz-Score in der DB aktualisieren
+            self.db_manager.update_set_scores(
+                self._current_set.set_id, 
+                self._current_set.score_own, 
+                self._current_set.score_opponent
+            )
             
-        return True
+            # 4. Prüfung der Satzende-Bedingung
+            is_set_over = self.check_set_end_condition()
+            
+            return True, is_set_over
+            
+        return False, False
 
     def add_players_to_active_game(self, player_ids: List[int]):
         """Speichert die Spieler-IDs, die am aktuellen Spiel teilnehmen (für Filterung der InputView)."""
         self._active_player_ids = player_ids 
         print(f"Spieler {player_ids} sind im aktiven Spiel (ID: {self._current_game_id}) registriert.")
+        
+    def get_all_sets_for_current_game(self) -> Dict[str, int]:
+        """Gibt eine Zuordnung von Satznummer (str) zu Set-ID (int) zurück."""
+        if self._current_game_id is None:
+            return {}
+
+        query = "SELECT set_number, set_id FROM sets WHERE game_id = ? ORDER BY set_number ASC"
+        
+        try:
+            raw_data = self.db_manager.execute_query_fetch_all(query, (self._current_game_id,))
+            
+            set_options = {f"Satz {row[0]}": row[1] for row in raw_data if row[0] is not None} 
+            set_options["Alle Sätze"] = -1
+            return set_options
+        except Exception as e:
+            print(f"Fehler beim Holen der Satzdaten: {e}")
+            return {}
 
 
     def get_all_players(self) -> Dict[int, str]:
@@ -198,22 +254,28 @@ class GameController:
     def get_set_number(self) -> int:
         """Gibt die Nummer des aktuellen Satzes zurück."""
         return self._current_set.set_number if self._current_set else 0
+        
+    def get_current_set(self) -> Optional[Set]:
+        """Gibt das aktuelle Set-Objekt zurück."""
+        return self._current_set
+        
+    def get_current_game_id(self) -> Optional[int]:
+        """Gibt die ID des aktuellen Spiels zurück."""
+        return self._current_game_id
     
     def load_game_context(self, game_id: int):
         """
         Lädt den Kontext des letzten Satzes und die aktiven Spieler 
         für ein bestehendes Spiel aus der DB neu.
         """
-        from ..data.models import Set # Stellen Sie sicher, dass Set importiert ist
+        from ..data.models import Set 
 
         # 1. Letzten Satz laden
         set_query = "SELECT set_id, set_number, score_own, score_opponent FROM sets WHERE game_id = ? ORDER BY set_number DESC LIMIT 1"
         latest_set_data = self.db_manager.execute_query_fetch_all(set_query, (game_id,))
         
         if not latest_set_data:
-            # Kein Satz vorhanden, starte neuen Satz
             print(f"Spiel {game_id} geladen, aber kein Satz gefunden. Starte Satz 1.")
-            # Die Methode start_new_set muss auch implementiert sein
             self.start_new_set(game_id) 
         else:
             set_id, set_number, score_own, score_opponent = latest_set_data[0]
@@ -241,45 +303,59 @@ class GameController:
             self._active_player_ids = [player[0] for player in players_data]
             print(f"Spiel {game_id} Kontext geladen. Setz-Nr.: {self._current_set.set_number}, Spieler-IDs: {self._active_player_ids}")
         else:
-             print(f"Fehler: Heim-Team für Spiel {game_id} nicht gefunden.")
-             
-    # src/modules/logic/game_controller.py (Zusätzlich zur bestehenden Klasse)
-
+            print(f"Fehler: Heim-Team für Spiel {game_id} nicht gefunden.")
+            
+    # --- BEARBEITUNGS-METHODEN (Filterung) ---
+    
     def get_action_details(self, action_id: int) -> Optional[Dict[str, Any]]:
-        """
-        Holt die Details einer einzelnen Aktion zur Bearbeitung aus der DB.
-        """
+        """Holt die Details einer einzelnen Aktion zur Bearbeitung aus der DB."""
         return self.db_manager.get_action_data_by_id(action_id)
 
-    def get_latest_actions(self, limit: int = 20) -> List[Tuple]:
+    def get_latest_actions(self, limit: int = 50, set_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """
-        Holt die letzten Aktionen des aktiven Satzes/Spiels für die Historie.
-        Tupel-Struktur: (action_id, set_number, time, executor_name, action_type, result_type, point_for)
+        Ruft die letzten Aktionen (maximal 'limit') für das aktuelle Spiel ab,
+        optional gefiltert nach set_id.
         """
-        if not self._current_set:
+        if self._current_game_id is None:
             return []
-        
-        # Abfrage muss die benötigten Felder liefern: 
+
+        # Basis-Query (holt Aktionen des aktuellen Spiels)
         query = """
-        SELECT a.action_id, s.set_number, SUBSTR(a.timestamp, 12, 8), p.name, 
-               a.action_type, a.result_type, a.point_for
-        FROM actions a
-        JOIN sets s ON a.set_id = s.set_id
-        LEFT JOIN players p ON a.executor_player_id = p.player_id
-        WHERE s.game_id = ? 
-        ORDER BY a.action_id DESC 
-        LIMIT ?
+            SELECT 
+                a.action_id, a.action_type, a.result_type, a.executor_player_id, 
+                p.name AS executor_name, s.set_number, a.timestamp
+            FROM actions a
+            JOIN sets s ON a.set_id = s.set_id
+            JOIN players p ON a.executor_player_id = p.player_id
+            WHERE s.game_id = ?
         """
-        params = (self._current_set.game_id, limit) 
+        params = [self._current_game_id]
         
-        return self.db_manager.execute_query_fetch_all(query, params)
+        # Filterung nach Satz, falls set_id angegeben wurde
+        if set_id is not None:
+            query += " AND a.set_id = ?"
+            params.append(set_id)
+
+        query += " ORDER BY a.timestamp DESC LIMIT ?"
+        params.append(limit)
+        
+        try:
+            self.db_manager.connect()
+            result = self.db_manager._cursor.execute(query, params).fetchall()
+            self.db_manager.close()
+            
+            columns = ['action_id', 'action_type', 'result_type', 'executor_player_id', 'executor_name', 'set_number', 'timestamp']
+            
+            data = [dict(zip(columns, row)) for row in result]
+            return data
+            
+        except Exception as e:
+            print(f"Fehler beim Holen der Aktionshistorie: {e}")
+            self.db_manager.close()
+            return []
 
     def _recalculate_set_score(self, set_id: int) -> bool:
-        """
-        BERECHNET den Punktestand eines Satzes neu, indem alle Aktionen im Satz gezählt werden.
-        Wird nach Bearbeitung oder Löschung aufgerufen.
-        """
-        # 1. Alle Aktionen des Satzes holen
+        """BERECHNET den Punktestand eines Satzes neu."""
         query = "SELECT point_for FROM actions WHERE set_id = ?"
         points = self.db_manager.execute_query_fetch_all(query, (set_id,))
         
@@ -289,10 +365,8 @@ class GameController:
             new_score_own = sum(1 for p in points if p[0] == 'OWN')
             new_score_opp = sum(1 for p in points if p[0] == 'OPP')
 
-        # 2. Score in der Datenbank aktualisieren
         self.db_manager.update_set_scores(set_id, new_score_own, new_score_opp)
         
-        # 3. Wenn es der aktive Satz ist, den internen Zustand aktualisieren
         if self._current_set and self._current_set.set_id == set_id:
             self._current_set.score_own = new_score_own
             self._current_set.score_opponent = new_score_opp
@@ -301,16 +375,13 @@ class GameController:
         return True
 
     def update_action(self, updated_data: Dict[str, Any]) -> bool:
-        """
-        Aktualisiert eine bestehende Aktion und löst die Neuberechnung des Scores aus.
-        """
+        """Aktualisiert eine bestehende Aktion und löst die Neuberechnung des Scores aus."""
         action_id = updated_data['action_id']
         old_details = self.get_action_details(action_id)
         
         if not old_details:
             return False
 
-        # 1. Kerndaten der Aktion aktualisieren
         success = self.db_manager.update_action_data(
             action_id=action_id,
             executor_id=updated_data['executor_id'],
@@ -319,23 +390,18 @@ class GameController:
         )
         
         if success:
-            # 2. Score neu berechnen, da sich die Aktion oder der Punktwert geändert haben könnte
             return self._recalculate_set_score(old_details['set_id'])
         return False
 
     def delete_action(self, action_id: int) -> bool:
-        """
-        Löscht eine Aktion und löst die Neuberechnung des Scores aus.
-        """
+        """Löscht eine Aktion und löst die Neuberechnung des Scores aus."""
         old_details = self.get_action_details(action_id)
         
         if not old_details:
             return False
 
-        # 1. Aktion löschen
         success = self.db_manager.delete_action_data(action_id)
         
         if success:
-            # 2. Score neu berechnen
             return self._recalculate_set_score(old_details['set_id'])
-        return False         
+        return False

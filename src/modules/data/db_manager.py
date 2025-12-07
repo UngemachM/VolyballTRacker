@@ -61,10 +61,32 @@ class DBManager:
             self.close()
 
     def setup_database(self):
-        """Erstellt alle notwendigen Tabellen."""
+        """Erstellt alle notwendigen Tabellen und führt eine einmalige Migration durch."""
         print("Erstelle Datenbanktabellen...")
         
-        # Verwende TEXT für Booleans, da SQLite keinen nativen Boolean-Typ hat
+        # --- KRITISCHE MIGRATION FÜR BEREITS EXISTIERENDE DATENBANKEN ---
+        # Dieser ALTER TABLE Befehl wird ausgeführt, falls die Spalte noch fehlt.
+        # Er kann nach erfolgreicher Migration der aktiven stats.db entfernt werden.
+        migration_queries = [
+            """
+            -- Fügt die Spalte point_detail_type hinzu (falls sie fehlt).
+        
+            """
+        ]
+        
+        for query in migration_queries:
+            try:
+                self.execute_query(query)
+            except Exception as e:
+                # Normalerweise wird hier eine Meldung wie "duplicate column name" ignoriert.
+                # Wir fahren fort, falls es kein kritischer Fehler ist.
+                if "duplicate column name" in str(e).lower():
+                     pass # Spalte existiert bereits
+                else:
+                     print(f"Migrationsfehler (kann ignoriert werden, wenn Spalte existiert): {e}")
+
+
+        # --- ERSTELLUNG/PRÜFUNG ALLER TABELLEN (inkl. neuer Spalten) ---
         queries = [
             """
             CREATE TABLE IF NOT EXISTS teams (
@@ -111,6 +133,7 @@ class DBManager:
                 result_type TEXT,
                 target_player_id INTEGER,
                 point_for TEXT,
+                point_detail_type TEXT, -- <<< NEUE SPALTE HIER ENTHALTEN
                 timestamp TEXT NOT NULL,
                 FOREIGN KEY (set_id) REFERENCES sets (set_id),
                 FOREIGN KEY (executor_player_id) REFERENCES players (player_id),
@@ -119,6 +142,7 @@ class DBManager:
             """
         ]
         
+        # Führt die CREATE TABLE IF NOT EXISTS Abfragen aus
         for query in queries:
             self.execute_query(query)
 
@@ -136,18 +160,23 @@ class DBManager:
             self.close()
 
     # --- Beispiel CRUD-Methode (Weitere folgen nach Bedarf) ---
-    def insert_player(self, player: Player, team_id: int):
-        """Fügt einen neuen Spieler in die Datenbank ein."""
-        # UPDATE: 'position' hinzugefügt
-        query = "INSERT INTO players (team_id, name, jersey_number, position) VALUES (?, ?, ?, ?)" 
-        self.execute_query(query, (team_id, player.name, player.jersey_number, player.position))
+    # src/modules/data/db_manager.py (Auszug)
+
+   # src/modules/data/db_manager.py (INNERHALB DER KLASSE DBManager)
+
+    # src/modules/data/db_manager.py (INNERHALB DER KLASSE DBManager)
+
+    def insert_action(self, action: Action, fetch_id: bool = False) -> Optional[int]:
+        """
+        Fügt eine neue Aktion in die Datenbank ein und gibt optional die ID zurück.
         
-    def insert_action(self, action: Action):
-        """Fügt eine neue Aktion in die Datenbank ein."""
+        Die point_for und point_detail_type werden direkt aus dem Action-Objekt geholt.
+        """
+        # NEU: 'point_detail_type' ist nun in der SQL-Abfrage enthalten.
         query = """
         INSERT INTO actions (set_id, action_type, executor_player_id, result_type, 
-                             target_player_id, point_for, timestamp) 
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+                             target_player_id, point_for, point_detail_type, timestamp) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             action.set_id, 
@@ -156,10 +185,12 @@ class DBManager:
             action.result_type,
             action.target_player_id, 
             action.point_for, 
+            action.point_detail_type, # NEU: Übergabe des Detail-Typs
             action.timestamp.strftime("%Y-%m-%d %H:%M:%S")
         )
-        self.execute_query(query, params)
-            
+        # fetch_id wird korrekt an execute_query weitergeleitet
+        return self.execute_query(query, params, fetch_id=fetch_id)
+    
     def get_player_details_by_team(self, team_id: int) -> Dict[int, str]:
         """Holt Spielerdetails nur für ein bestimmtes Team."""
         query = "SELECT player_id, name FROM players WHERE team_id = ?"
@@ -300,6 +331,30 @@ class DBManager:
         except Exception as e:
             print(f"Fehler bei Eindeutigkeitsprüfung: {e}")
             return False # Im Zweifelsfall Fehler melden
+        
+    def insert_player(self, player, team_id: Optional[int] = None) -> Optional[int]:
+        """
+        Fügt einen neuen Spieler in die Datenbank ein und gibt optional dessen ID zurück.
+        
+        Args:
+            player (Player): Das Player-Objekt (aus models.py) mit Name, Trikotnummer, Position.
+            team_id (Optional[int]): Die ID des zugewiesenen Teams.
+            
+        Returns:
+            Optional[int]: Die ID des neu eingefügten Spielers oder None bei Fehler.
+        """
+        query = """
+        INSERT INTO players (name, jersey_number, position, team_id) 
+        VALUES (?, ?, ?, ?)
+        """
+        params = (
+            player.name, 
+            player.jersey_number, 
+            player.position, 
+            team_id # team_id kann NULL sein, wenn None übergeben wird
+        )
+        # Verwende die zentrale execute_query-Methode und fordere die ID an
+        return self.execute_query(query, params, fetch_id=True)
 
     def update_player(self, player_id: int, name: str, jersey_number: int, position: str) -> bool:
         """Aktualisiert die Details eines bestehenden Spielers."""
@@ -308,15 +363,10 @@ class DBManager:
             SET name = ?, jersey_number = ?, position = ? 
             WHERE player_id = ?
         """
-        try:
-            self.connect()
-            self._cursor.execute(query, (name, jersey_number, position, player_id))
-            self.commit()
-            self.close()
-            return True
-        except Exception as e:
-            print(f"Fehler beim Aktualisieren des Spielers: {e}")
-            return False
+        params = (name, jersey_number, position, player_id)
+
+        # RUFEN SIE HIER execute_query auf (anstelle der direkten connect/commit-Logik)
+        return self.execute_query(query, params)
         
     def get_action_data_by_id(self, action_id: int) -> Optional[Dict[str, Any]]:
         """
