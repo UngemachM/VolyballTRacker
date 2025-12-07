@@ -468,14 +468,18 @@ class InputView(ctk.CTkFrame):
             self.show_result_dialog(executor_id, action_name)
             return
 
+    # src/modules/gui/input_view.py (INNERHALB DER KLASSE InputView)
+
     def show_result_dialog(self, executor_id: int, action_name: str):
-        """Öffnet den ActionDialog. Der Callback ist on_action_details_received."""
+        """Öffnet einen Dialog, um das Ergebnis einer Aktion abzufragen."""
+        from .action_dialog import ActionDialog 
+        
         ActionDialog(
             master=self.master.master, 
             executor_id=executor_id,
             action_name=action_name,
             players=self.players,
-            callback=self.on_action_details_received # GEÄNDERT: Ruft zuerst den Checker auf
+            callback=self.on_action_details_received  # <--- KRITISCH: RUFT DEN CHECKER AUF
         )
         
     def process_final_action(self, 
