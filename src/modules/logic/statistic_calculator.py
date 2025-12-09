@@ -3,6 +3,7 @@
 from typing import Dict, List, Any, Optional
 import pandas as pd
 from modules.data.db_manager import DBManager
+# HINWEIS: Optional mÃ¶glicherweise nicht in allen Umgebungen nÃ¶tig, aber fÃ¼r Typ-Sicherheit beibehalten.
 
 class StatisticCalculator:
     """
@@ -15,7 +16,6 @@ class StatisticCalculator:
     def fetch_all_actions_for_game(self, game_id: int) -> pd.DataFrame:
         """
         Fragt alle Aktionen für ein gegebenes Spiel ab und gibt sie als Pandas DataFrame zurück.
-        Pandas ist ideal für schnelle Aggregationen und Berechnungen.
         """
         query = """
         SELECT a.executor_player_id, a.action_type, a.result_type, a.target_player_id
@@ -25,99 +25,18 @@ class StatisticCalculator:
         """
         
         try:
-            raw_data = self.db_manager.execute_query_fetch_all(query, (game_id,))
-            
-            if not raw_data:
-                return pd.DataFrame()
-                
-            df = pd.DataFrame(raw_data, columns=['executor_player_id', 'action_type', 'result_type', 'target_player_id'])
+            self.db_manager.connect()
+            # Der DBManager mÃ¼sste eine ._connection bereitstellen oder read_sql_query anpassen
+            df = pd.read_sql_query(query, self.db_manager._connection, params=(game_id,))
+            self.db_manager.close()
             return df
         except Exception as e:
             print(f"Fehler beim Laden der Aktionen: {e}")
             return pd.DataFrame()
-    
-    # --- METHODE ZUR BERECHNUNG ALLER SPIELERSTATISTIKEN ---
 
-    def calculate_player_performance_summary(self, game_id: int) -> pd.DataFrame:
-        """
-        Berechnet eine zusammenfassende Tabelle mit den wichtigsten Statistiken
-        für jeden Spieler im Spiel.
-        """
-        df = self.fetch_all_actions_for_game(game_id)
-        
-        if df.empty:
-            return pd.DataFrame(columns=[
-                'Spieler', 'Angriffe', 'Kills', 'Angriffsfehler', 'Angriffs-Eff. (%)', 
-                'Kill-Rate (%)', 'Aufschläge', 'Asse', 'Aufschlagfehler', 
-                'Ass-Rate (%)', 'Blockpunkte', 'Zuspiele', 'Zuspiel_Fehler', 
-                'Zuspiel-Fehlerquote (%)'
-            ])
-
-        # 1. Spalten für Zählungen erstellen (Vektorisiert)
-        df['Attack_Total'] = (df['action_type'] == 'Angriff').astype(int)
-        df['Attack_Kill'] = (df['result_type'] == 'Kill').astype(int)
-        df['Attack_Error'] = ((df['result_type'] == 'Fehler') & (df['action_type'] == 'Angriff')).astype(int)
-        
-        df['Serve_Total'] = (df['action_type'] == 'Aufschlag').astype(int)
-        df['Serve_Ace'] = (df['result_type'] == 'Ass').astype(int)
-        df['Serve_Error'] = ((df['result_type'] == 'Fehler') & (df['action_type'] == 'Aufschlag')).astype(int)
-        
-        df['Block_Point'] = ((df['action_type'] == 'Block') & (df['result_type'] == 'Punkt')).astype(int)
-        
-        df['Set_Total'] = (df['action_type'] == 'Zuspiel').astype(int)
-        df['Set_Error'] = ((df['result_type'] == 'Fehler') & (df['action_type'] == 'Zuspiel')).astype(int)
-        
-        # 2. Aggregation: Gruppierung nach Spieler-ID und Summierung der Zählungen
-        summary_df = df.groupby('executor_player_id').agg(
-            Angriffe=('Attack_Total', 'sum'),
-            Kills=('Attack_Kill', 'sum'),
-            Angriffsfehler=('Attack_Error', 'sum'),
-            Aufschläge=('Serve_Total', 'sum'),
-            Asse=('Serve_Ace', 'sum'),
-            Aufschlagfehler=('Serve_Error', 'sum'),
-            Blockpunkte=('Block_Point', 'sum'),
-            Zuspiele=('Set_Total', 'sum'),
-            Zuspiel_Fehler=('Set_Error', 'sum')
-        ).reset_index()
-
-        # 3. Berechnung der Raten und Effizienzen (Prozentwerte)
-        
-        summary_df['Angriffs-Eff. (%)'] = (summary_df['Kills'] - summary_df['Angriffsfehler']) / summary_df['Angriffe']
-        summary_df['Kill-Rate (%)'] = (summary_df['Kills'] / summary_df['Angriffe'])
-        summary_df['Ass-Rate (%)'] = (summary_df['Asse'] / summary_df['Aufschläge'])
-        summary_df['Zuspiel-Fehlerquote (%)'] = (summary_df['Zuspiel_Fehler'] / summary_df['Zuspiele'])
-
-        # 4. Spielernamen hinzufügen (mit Ausnahme von ID 0 = Gegner)
-        def get_name(player_id):
-            if player_id == 0:
-                return "Gegner (Team-Punkt)" 
-            name = self.db_manager.get_player_name_by_id(int(player_id))
-            return name if name else f"ID: {int(player_id)}"
-
-        summary_df['Spieler'] = summary_df['executor_player_id'].apply(get_name)
-        
-        summary_df = summary_df[summary_df['executor_player_id'] != 0]
-
-        # 5. Finalisierung und Formatierung
-        final_columns = [
-            'Spieler', 
-            'Angriffe', 'Kills', 'Angriffsfehler', 'Angriffs-Eff. (%)', 'Kill-Rate (%)',
-            'Aufschläge', 'Asse', 'Aufschlagfehler', 'Ass-Rate (%)',
-            'Blockpunkte', 
-            'Zuspiele', 'Zuspiel_Fehler', 'Zuspiel-Fehlerquote (%)'
-        ]
-        
-        summary_df = summary_df.fillna(0)
-        summary_df[['Angriffs-Eff. (%)', 'Kill-Rate (%)', 'Ass-Rate (%)', 'Zuspiel-Fehlerquote (%)']] *= 100
-
-        return summary_df[final_columns].round(1)
-
-    # --- METHODE ZUR BERECHNUNG DER ANGRIIFSEFFIZIENZ (TEAM) ---
-    
     def calculate_attack_efficiency(self, game_id: int, player_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Berechnet die Angriffseffizienz (Kill - Fehler) / Gesamtangriffe.
-        (Primär für die Team-Anzeige in AnalysisView)
         """
         df = self.fetch_all_actions_for_game(game_id)
         
@@ -133,7 +52,6 @@ class StatisticCalculator:
         if total_attacks == 0:
             return {"efficiency": 0, "kills": 0, "errors": 0, "total_attacks": 0}
 
-        # Angriffsfehler sind Result 'Fehler' bei Action 'Angriff'
         kills = len(attack_df[attack_df['result_type'] == 'Kill'])
         errors = len(attack_df[attack_df['result_type'] == 'Fehler'])
         
@@ -145,61 +63,122 @@ class StatisticCalculator:
             "errors": errors, 
             "total_attacks": total_attacks
         }
+        
+    # --- NEU: ANFORDERUNG 2: AUFSCHLAG QUOTE ---
 
-    # --- METHODE ZUR BERECHNUNG DER ZUSPIELVERTEILUNG (ÜBERARBEITET) ---
-
-    def calculate_setting_distribution(self, game_id: int) -> pd.DataFrame:
+    def calculate_service_rate(self, game_id: int, player_id: Optional[int] = None) -> Dict[str, Any]:
         """
-        Berechnet, wie oft ein Zuspieler zu welchem Angreifer zugespielt hat,
-        inklusive prozentualer Verteilung und Zuspiel-Fehlern.
+        Berechnet die Aufschlag-Quote: (Ass + Ins Feld) / Gesamt-Aufschläge.
         """
-        # Daten abrufen
         df = self.fetch_all_actions_for_game(game_id)
         
         if df.empty:
+            return {"rate": 0.0, "total_serves": 0, "aces": 0, "in_court": 0}
+
+        service_df = df[df['action_type'] == 'Aufschlag']
+        
+        if player_id:
+            service_df = service_df[service_df['executor_player_id'] == player_id]
+
+        total_serves = len(service_df)
+        if total_serves == 0:
+            return {"rate": 0.0, "total_serves": 0, "aces": 0, "in_court": 0}
+
+        # Aces ('Ass') und Ins Feld ('Ins Feld')
+        aces = len(service_df[service_df['result_type'] == 'Ass'])
+        in_court = len(service_df[service_df['result_type'] == 'Ins Feld'])
+        
+        rate = (aces + in_court) / total_serves
+        
+        return {
+            "rate": round(rate, 3), 
+            "aces": aces,
+            "in_court": in_court,
+            "total_serves": total_serves
+        }
+
+    # --- NEU: ANFORDERUNG 1: GENERAL STATS AGGREGATOR ---
+
+    def calculate_player_general_stats(self, game_id: int) -> pd.DataFrame:
+        """
+        Aggregiert alle relevanten Aktionen pro Spieler fÃ¼r die Spielerzusammenfassung.
+        """
+        df = self.fetch_all_actions_for_game(game_id)
+
+        if df.empty:
             return pd.DataFrame()
+
+        # Filtern von Aktionen ohne Spieler (executor_player_id = 0)
+        df_player = df[df['executor_player_id'] != 0].copy()
+
+        if df_player.empty:
+             return pd.DataFrame()
+
+        # Initialisiere alle Spieler, die Aktionen ausgefÃ¼hrt haben
+        stats = pd.DataFrame(df_player['executor_player_id'].unique(), columns=['executor_player_id'])
+
+        # Funktion zur ZÃ¤hlung spezifischer Ergebnisse
+        def count_result(df, action_type, result_type):
+            return df[(df['action_type'] == action_type) & (df['result_type'] == result_type)].groupby('executor_player_id').size()
+
+        # HILFSFUNKTION: Aggregiert und fÃ¼gt Spalte hinzu, fÃ¼llt N/A mit 0
+        def add_stat_column(stats_df, df_source, col_name, action_type, result_type=None):
+            if result_type:
+                counts = count_result(df_source, action_type, result_type)
+            else:
+                counts = df_source[df_source['action_type'] == action_type].groupby('executor_player_id').size()
+                
+            stats_df[col_name] = stats_df['executor_player_id'].map(counts).fillna(0).astype(int)
             
-        # Filtern nach Zuspiel-Aktionen
-        setting_df = df[df['action_type'] == 'Zuspiel']
+        
+        add_stat_column(stats, df_player, 'Kills', 'Angriff', 'Kill')
+        add_stat_column(stats, df_player, 'Angriffsfehler', 'Angriff', 'Fehler')
+        add_stat_column(stats, df_player, 'Blockpunkte', 'Block', 'Punkt')
+        add_stat_column(stats, df_player, 'Aufschlag-Asse', 'Aufschlag', 'Ass')
+        add_stat_column(stats, df_player, 'Aufschlagfehler', 'Aufschlag', 'Fehler')
+        add_stat_column(stats, df_player, 'Angriffe Gesamt', 'Angriff')
+        add_stat_column(stats, df_player, 'Aufschläge Gesamt', 'Aufschlag')
 
-        # Aggregation: Zähle die Zuspiel-Versuche pro Zuspieler und Zielspieler
-        distribution = setting_df.groupby(['executor_player_id', 'target_player_id']).size().reset_index(name='Total')
-        
-        # Zähle die Fehler pro Zuspieler (nur executor_player_id nötig)
-        setting_errors = setting_df[(setting_df['result_type'] == 'Fehler')].groupby('executor_player_id').size().reset_index(name='Fehler')
-        
-        # Fehler-DF mit Distribution-DF zusammenführen, um Fehler pro Zuspieler zu erhalten
-        setter_stats = distribution.groupby('executor_player_id')['Total'].sum().reset_index(name='Zuspiele Gesamt')
-        setter_stats = pd.merge(setter_stats, setting_errors, on='executor_player_id', how='left').fillna(0)
-        
-        # Gesamtstatistik wieder mit Distribution zusammenführen
-        distribution = pd.merge(distribution, setter_stats[['executor_player_id', 'Zuspiele Gesamt', 'Fehler']], on='executor_player_id', how='left')
 
-        # Spielernamen hinzufügen
+        # Berechne Angriffseffizienz (wird fÃ¼r Filtering/Anzeige benÃ¶tigt)
+        stats['Angriffseffizienz'] = (stats['Kills'] - stats['Angriffsfehler']) / stats['Angriffe Gesamt'].replace(0, pd.NA) 
+        stats['Angriffseffizienz'] = stats['Angriffseffizienz'].fillna(0).round(3)
+
+        return stats[['executor_player_id', 'Kills', 'Angriffsfehler', 'Blockpunkte', 
+                      'Aufschlag-Asse', 'Aufschlagfehler', 'Angriffe Gesamt', 
+                      'Aufschläge Gesamt', 'Angriffseffizienz']]
+
+
+    def calculate_setting_distribution(self, game_id: int) -> pd.DataFrame:
+        """Berechnet, wie oft ein Zuspieler zu welchem Angreifer zugespielt hat."""
+        
+        # 1. Daten abrufen: Wir verwenden die neue Methode im DBManager
+        raw_data = self.db_manager.fetch_setting_actions(game_id)
+        
+        if not raw_data:
+            return pd.DataFrame()
+
+        # Konvertiere raw_data zu einem DataFrame: 
+        # Spalten: ['executor_id', 'target_id']
+        df = pd.DataFrame(raw_data, columns=['executor_id', 'target_id'])
+        
+        # 2. Aggregation: ZÃ¤hle die Zuspiel-Versuche pro Zuspieler und Zielspieler
+        distribution = df.groupby(['executor_id', 'target_id']).size().reset_index(name='Total')
+        
+        # 3. Spielernamen fÃ¼r die Lesbarkeit hinzufÃ¼gen
+        
+        # Mapping Funktion fÃ¼r Spieler-Namen
         def get_name(player_id):
             if pd.isna(player_id) or player_id is None:
                 return "Kein Ziel"
-            name = self.db_manager.get_player_name_by_id(int(player_id))
-            return name if name else f"ID: {int(player_id)}"
+            # Annahme: get_player_name_by_id existiert im DBManager und ist performant
+            return self.db_manager.get_player_name_by_id(int(player_id))
 
-        distribution['Zuspieler'] = distribution['executor_player_id'].apply(get_name)
-        distribution['Angreifer'] = distribution['target_player_id'].apply(get_name)
+        distribution['Zuspieler'] = distribution['executor_id'].apply(get_name)
+        distribution['Angreifer'] = distribution['target_id'].apply(get_name)
 
-        # Prozentsätze berechnen
-        distribution['Anteil am Zuspieler (%)'] = (distribution['Total'] / distribution['Zuspiele Gesamt'] * 100).round(1)
-        
-        # Zuspieler-Statistik pro Zeile wiederholen
-        distribution['Zuspieler Fehler (%)'] = (distribution['Fehler'] / distribution['Zuspiele Gesamt'] * 100).round(1)
+        # 4. ProzentsÃ¤tze berechnen 
+        total_by_setter = distribution.groupby('Zuspieler')['Total'].transform('sum')
+        distribution['Prozent'] = (distribution['Total'] / total_by_setter * 100).round(1)
 
-        # Spalten für die Anzeige optimieren
-        final_columns = [
-            'Zuspieler', 
-            'Angreifer', 
-            'Total', 
-            'Anteil am Zuspieler (%)', 
-            'Zuspiele Gesamt', 
-            'Fehler',
-            'Zuspieler Fehler (%)'
-        ]
-
-        return distribution[final_columns]
+        return distribution[['Zuspieler', 'Angreifer', 'Total', 'Prozent', 'executor_id']] # <<< executor_id fÃ¼r die Kachel-Ansicht beibehalten

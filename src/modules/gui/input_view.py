@@ -109,6 +109,8 @@ class InputView(ctk.CTkFrame):
         self.load_game_options()
         self.load_game_data()
         
+    # src/modules/gui/input_view.py (INNERHALB DER KLASSE InputView)
+
     def on_action_details_received(self, result_data: Optional[Dict[str, Any]]):
         """
         Wird vom ActionDialog aufgerufen.
@@ -121,13 +123,13 @@ class InputView(ctk.CTkFrame):
         result_type = result_data.get('result_type')
         
         # Logik, die bestimmt, ob es sich um eine punktbringende Aktion handelt:
-        # HINWEIS: Hier prüfen wir nur auf die RESULT-Typen, die zu OWN/OPP-Punkten führen
         point_resulting_results = ['Kill', 'Ass', 'Punkt'] 
 
-        # Wir prüfen nur, wenn die Aktion im GameController überhaupt einen Punkt auslösen würde
         is_point_action = result_type in point_resulting_results 
         
-        if is_point_action:
+        # KRITISCHE KORREKTUR: Detail-Dialog NUR für Block-Punkte öffnen.
+        # Alle 'Kill' (Angriff) und 'Ass' (Aufschlag) gehen direkt zur Speicherung über.
+        if is_point_action and action_type == "Block":
             # Speichere die Kerndaten zwischen
             self._pending_action_data = result_data
             
@@ -138,7 +140,7 @@ class InputView(ctk.CTkFrame):
                 callback=self.on_point_details_received
             )
         else:
-            # Keine Punkt-Details erforderlich, Aktion direkt verarbeiten
+            # Wenn es kein Punkt ist ODER wenn es Angriff/Aufschlag ist: Direkt zur finalen Speicherung.
             self.process_final_action(result_data)
             
     def on_point_details_received(self, point_detail_code: str):

@@ -20,9 +20,9 @@ DB_PATH = os.path.join(DB_FOLDER, 'stats.db')
 # Rollen und Aktionen (für GUI und Validierung)
 ACTION_TYPES = {
     'Zuspiel': ['Gut', 'Mittel',"Schlecht", 'Fehler'],
-    'Angriff': ['Kill', 'Halber',"lob","smart","Gepritscht",  'Fehler', 'Blockiert'],
+    'Angriff': ['Kill', 'Halber',"lob","smart","Gepritscht",  'Fehler', 'Blockiert', 'Abgewehrt'], # <<< 'Abgewehrt' hinzugefügt    'Aufschlag': ['Ass',"Halbes", 'Ins Feld', 'Fehler'],
     'Aufschlag': ['Ass',"Halbes", 'Ins Feld', 'Fehler'],
-    'Block': ['Punkt', 'Fehler','Touch'],
+    'Block': ['Punkt', 'Fehler', 'Touch', 'Soft Block'], # <<< NEU: 'Soft Block' hinzugefügt
     'Sicherung': ['Gut', 'Fehler']
 }
 
@@ -55,14 +55,16 @@ POINT_MAPPING = {
     ("Kill", "Angriff"): "OWN", 
     ("Block", "Punkt"): "OWN", 
     ("Ass", "Aufschlag"): "OWN",
+    ("Halbes", "Aufschlag"): "OWN",
     ("Unser Punkt", "Unser Punkt"): "OWN", 
     
     ("Fehler", "Angriff"): "OPP",
     ("Fehler", "Aufschlag"): "OPP",
-    ("Blockiert", "Angriff"): "OPP", 
+    ("Blockiert", "Angriff"): None, 
     ("Fehler", "Zuspiel"): "OPP",
     ("Fehler", "Block"): "OPP",
     ("Touch", "Block"): None,
+    ("Soft Block", "Block"): None, # <<< NEU: Soft Block führt zu keinem direkten Punkt
 }
 
 # --- KRITISCHE KORREKTUR: Mapping der Detailcodes zur finalen Punktzuweisung (für GameController) ---
