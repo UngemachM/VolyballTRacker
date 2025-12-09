@@ -138,35 +138,33 @@ class GameController:
         Verarbeitet eine Aktion, speichert sie und aktualisiert den Spielstand.
         Gibt zurück: (success: bool, is_set_over: bool)
         
-        HINWEIS: Die Logik wurde korrigiert, um point_detail_type zu priorisieren.
+        KORREKTUR: Priorisiert point_detail_type für die Punktezuteilung.
         """
         if not self._current_set or self._current_game_id is None:
             print("Fehler: Kein aktiver Satz oder Spiel gefunden.")
             return False, False
 
-        # --- LOGIK ZUR ERMITTLUNG VON POINT_FOR (KORRIGIERT) ---
         point_for = None
         
-        # 1. Wenn Punkt-Details vorhanden sind, verwenden wir diese zur Zuweisung.
+        # 1. PRIORITY: PUNKTZUWEISUNG BASIEREND AUF DETAIL CODE (vom Dialog)
         if point_detail_type:
-            # Wir verwenden die Codes, um die Punktrichtung zu bestimmen.
+            # Diese Codes führen zu einem Punkt für das EIGENE TEAM
             if point_detail_type in ["P_ATTACK", "P_BLOCK", "P_OPP_FLOOR_ERR", "S_OWN_SAVE"]:
-                # P_ATTACK, P_BLOCK, P_OPP_FLOOR_ERR (Gegner Fehler) sind Punkte für uns
                 point_for = 'OWN'
+            # Diese Codes führen zu einem Punkt für den GEGNER (unser Fehler)
             elif point_detail_type in ["P_OWN_FLOOR_ERR", "S_OPP_SAVE"]:
-                # P_OWN_FLOOR_ERR (Eigener Fehler) ist ein Punkt für den Gegner
                 point_for = 'OPP'
-                
-            # HINWEIS: S_OWN_SAVE und S_OPP_SAVE sollten keine Punkte auslösen, 
-            # sind hier aber zur späteren Analyse als 'OWN'/'OPP' eingetragen, 
-            # da der Dialog nur bei PUNKTE-relevanten Aktionen erscheint.
 
-        # 2. Fallback für den "Unser Punkt"-Button (der keinen Detail-Dialog nutzt)
+        # 2. FALLBACK: DIREKTE BUTTON-AKTIONEN (Die den Dialog umgehen)
         elif action_type == "Unser Punkt":
-            point_for = POINT_MAPPING.get(("Unser Punkt", "Unser Punkt"))
+            point_for = 'OWN'
+        elif action_type == "Gegner Punkt": # NEU: Für den direkten Gegner-Punkt-Button
+            point_for = 'OPP'
             
-        # 3. Ansonsten bleibt point_for None (kein direkter Punkt)
-
+        # 3. FALLBACK: ORIGINAL LOGIC (für Fehler/Blockiert ohne Detail-Dialog)
+        elif result_type and action_type in ACTION_TYPES.keys():
+            point_for = POINT_MAPPING.get((result_type, action_type))
+        
         # 1. Internen Score-Zähler aktualisieren
         if point_for == 'OWN':
             self._current_set.score_own += 1
@@ -181,7 +179,7 @@ class GameController:
             result_type=result_type,
             target_player_id=target_id,
             point_for=point_for,
-            point_detail_type=point_detail_type
+            point_detail_type=point_detail_type 
         )
         
         action_id = self.db_manager.insert_action(action_data, fetch_id=True) 
