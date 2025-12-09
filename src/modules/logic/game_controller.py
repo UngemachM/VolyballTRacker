@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Tuple, Any
 import datetime
 from ..data.db_manager import DBManager
 from ..data.models import Action, Set
-from ..config import POINT_FOR, POINT_MAPPING, ACTION_TYPES
+from ..config import POINT_FOR, POINT_MAPPING, ACTION_TYPES, POINT_DETAIL_CODE_MAPPING
 
 class GameController:
     """
@@ -133,12 +133,13 @@ class GameController:
         
     # src/modules/logic/game_controller.py (INNERHALB DER KLASSE GameController)
 
+    # src/modules/logic/game_controller.py (INNERHALB DER KLASSE GameController)
+
+    # src/modules/logic/game_controller.py (INNERHALB DER KLASSE GameController)
+
     def process_action(self, executor_id: int, action_type: str, result_type: Optional[str] = None, target_id: Optional[int] = None, point_detail_type: Optional[str] = None) -> Tuple[bool, bool]:
         """
         Verarbeitet eine Aktion, speichert sie und aktualisiert den Spielstand.
-        Gibt zurück: (success: bool, is_set_over: bool)
-        
-        KORREKTUR: Priorisiert point_detail_type für die Punktezuteilung.
         """
         if not self._current_set or self._current_game_id is None:
             print("Fehler: Kein aktiver Satz oder Spiel gefunden.")
@@ -148,20 +149,16 @@ class GameController:
         
         # 1. PRIORITY: PUNKTZUWEISUNG BASIEREND AUF DETAIL CODE (vom Dialog)
         if point_detail_type:
-            # Diese Codes führen zu einem Punkt für das EIGENE TEAM
-            if point_detail_type in ["P_ATTACK", "P_BLOCK", "P_OPP_FLOOR_ERR", "S_OWN_SAVE"]:
-                point_for = 'OWN'
-            # Diese Codes führen zu einem Punkt für den GEGNER (unser Fehler)
-            elif point_detail_type in ["P_OWN_FLOOR_ERR", "S_OPP_SAVE"]:
-                point_for = 'OPP'
+            # Holt die eindeutige Zuweisung (OWN oder OPP) aus dem Mapping
+            point_for = POINT_DETAIL_CODE_MAPPING.get(point_detail_type)
 
-        # 2. FALLBACK: DIREKTE BUTTON-AKTIONEN (Die den Dialog umgehen)
+        # 2. FALLBACK: DIREKTE BUTTON-AKTIONEN (die den Dialog umgehen)
         elif action_type == "Unser Punkt":
             point_for = 'OWN'
-        elif action_type == "Gegner Punkt": # NEU: Für den direkten Gegner-Punkt-Button
+        elif action_type == "Gegner Punkt": 
             point_for = 'OPP'
             
-        # 3. FALLBACK: ORIGINAL LOGIC (für Fehler/Blockiert ohne Detail-Dialog)
+        # 3. FALLBACK: ORIGINAL LOGIC (für result_type, falls keine der oberen Logiken zutrifft)
         elif result_type and action_type in ACTION_TYPES.keys():
             point_for = POINT_MAPPING.get((result_type, action_type))
         
@@ -171,30 +168,22 @@ class GameController:
         elif point_for == 'OPP':
             self._current_set.score_opponent += 1
 
-        # 2. Aktion in DB speichern 
+        # 2. Aktion in DB speichern (Action-Daten erstellen...)
         action_data = Action(
             set_id=self._current_set.set_id,
             action_type=action_type, 
             executor_player_id=executor_id,
             result_type=result_type,
             target_player_id=target_id,
-            point_for=point_for,
+            point_for=point_for, # Wird jetzt korrekt gesetzt
             point_detail_type=point_detail_type 
         )
         
         action_id = self.db_manager.insert_action(action_data, fetch_id=True) 
         
         if action_id:
-            # 3. Satz-Score in der DB aktualisieren
-            self.db_manager.update_set_scores(
-                self._current_set.set_id, 
-                self._current_set.score_own, 
-                self._current_set.score_opponent
-            )
-            
-            # 4. Prüfung der Satzende-Bedingung
+            self.db_manager.update_set_scores(self._current_set.set_id, self._current_set.score_own, self._current_set.score_opponent)
             is_set_over = self.check_set_end_condition()
-            
             return True, is_set_over
             
         return False, False

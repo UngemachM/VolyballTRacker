@@ -1,14 +1,14 @@
-# src/modules/config.py
+# src/config.py
 
 import os
 import sys
 
 # Pfad zur SQLite-Datenbank
 if getattr(sys, 'frozen', False):
-# App läuft als PyInstaller-Exe
+    # App läuft als PyInstaller-Exe
     BASE_DIR = sys._MEIPASS
 else:
-# App läuft im Entwicklungsmodus
+    # App läuft im Entwicklungsmodus
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # Datenbankpfad: Wird im 'resources/db' Ordner innerhalb des BASE_DIR gesucht
@@ -22,7 +22,7 @@ ACTION_TYPES = {
     'Zuspiel': ['Gut', 'Mittel',"Schlecht", 'Fehler'],
     'Angriff': ['Kill', 'Halber',"lob","smart","Gepritscht",  'Fehler', 'Blockiert'],
     'Aufschlag': ['Ass',"Halbes", 'Ins Feld', 'Fehler'],
-    'Block': ['Punkt', 'Fehler']
+    'Block': ['Punkt', 'Fehler','Touch']
 }
 
 POINT_FOR = {
@@ -40,33 +40,40 @@ VOLLEYBALL_POSITIONS = [
     "Universal"
 ]
 
-# --- NEU: POINT MAPPING ZUR KORREKTEN PUNKTEVERGABE ---
+# --- NEU: Detail-Optionen für Punkte (für PointDetailDialog) ---
+POINT_DETAIL_OUTCOMES = {
+    
+    "Block": "BLOCK",
+    "Sicherung Gegner": "OPP_SAVE",
+    "Touch": "Touch",
+}
+
+# --- NEU: Punktewertungen (Fallback/Direkt-Aktionen) ---
 POINT_MAPPING = {
-    # 1. Direkte eigene Punkte (OWN)
     ("Kill", "Angriff"): "OWN", 
     ("Block", "Punkt"): "OWN", 
     ("Ass", "Aufschlag"): "OWN",
-    ("Unser Punkt", "Unser Punkt"): "OWN", # Spezieller Fall für 'Unser Punkt' Button
+    ("Unser Punkt", "Unser Punkt"): "OWN", 
     
-    # 2. Direkte gegnerische Punkte (OPP) durch eigenen Fehler
     ("Fehler", "Angriff"): "OPP",
     ("Fehler", "Aufschlag"): "OPP",
-    ("Blockiert", "Angriff"): "OPP", # Block vom Gegner = Punkt Gegner
+    ("Blockiert", "Angriff"): "OPP", 
     ("Fehler", "Zuspiel"): "OPP",
     ("Fehler", "Block"): "OPP",
-    
-    # Alle anderen Resultate (Halber, Gut, Mittel, Ins Feld, lob, smart, Gepritscht) lösen keinen Punkt aus.
+    ("Touch", "Block"): None,
 }
 
-POINT_DETAIL_OUTCOMES = {
-    "Punkt am Netz (Angriff)": "P_ATTACK",
-    "Punkt am Netz (Block)": "P_BLOCK",
+# --- KRITISCHE KORREKTUR: Mapping der Detailcodes zur finalen Punktzuweisung (für GameController) ---
+POINT_DETAIL_CODE_MAPPING = {
+    # Punkte für das EIGENE TEAM
+    "P_ATTACK": "OWN",        
+    "P_BLOCK": "OWN",         
+    "P_OPP_FLOOR_ERR": "OWN", 
     
-    # Details zum Boden/Fehler
-    "Boden Gegner (Punktgewinn)": "P_OPP_FLOOR_ERR",
-    "Boden wir (Punktverlust)": "P_OWN_FLOOR_ERR",
-    
-    # Details zur Sicherung/Kontrolle (könnten später im GameController als "halbe Punkte" behandelt werden)
-    "Sicherung Gegner (Kontrolle)": "S_OPP_SAVE",
-    "Sicherung wir (Kontrolle)": "S_OWN_SAVE",
+    # PUNKT FÜR DEN GEGNER
+    "P_OWN_FLOOR_ERR": "OPP", 
+
+    # Keine Punkte
+    "S_OPP_SAVE": None,
+    "S_OWN_SAVE": None,
 }

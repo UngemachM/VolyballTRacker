@@ -482,6 +482,8 @@ class InputView(ctk.CTkFrame):
             return
 
         elif action_name == "Block":
+            
+            
             # Erstelle die Datenstruktur für den Detail-Checker
             result_data = {
                 "executor_id": executor_id,
