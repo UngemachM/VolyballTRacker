@@ -157,22 +157,33 @@ class InputView(ctk.CTkFrame):
         # Speicher zurücksetzen
         self._pending_action_data = None
             
+   # src/modules/gui/input_view.py (INNERHALB DER KLASSE InputView)
+
     def _setup_fixed_buttons(self):
-        """Erstellt die Buttons außerhalb des scrollbaren Bereichs. ACHTUNG: Rows 3 und 4 genutzt."""
+        """Erstellt die Buttons außerhalb des scrollbaren Bereichs. ACHTUNG: Rows 3, 4, 5 genutzt."""
+        
         # Spezialfall 'Unser Punkt' (Row 3)
         ctk.CTkButton(
             self, text="Unser Punkt (z.B. Gegner Fehler)", 
             command=lambda: self.handle_action(executor_id=0, action_name="Unser Punkt")
-        ).grid(row=3, column=0, sticky="ew", padx=10, pady=10)
-
-        # Spiel beenden (Row 4)
+        ).grid(row=3, column=0, sticky="ew", padx=10, pady=(10, 5)) # Angepasstes Padding
+        
+        # NEU: GEGNER PUNKT BUTTON (Row 4)
+        ctk.CTkButton(
+            self, text="Gegner Punkt (z.B. unser Fehler)", 
+            command=lambda: self.handle_action(executor_id=0, action_name="Gegner Punkt"),
+            fg_color="darkred", 
+            hover_color="red"
+        ).grid(row=4, column=0, sticky="ew", padx=10, pady=5)
+        
+        # Spiel beenden (Row 5)
         ctk.CTkButton(
             self, 
             text="🛑 SPIEL BEENDEN", 
             command=self.end_game_confirmation,
             fg_color="red", 
             hover_color="darkred"
-        ).grid(row=4, column=0, sticky="ew", padx=10, pady=(5, 20))
+        ).grid(row=5, column=0, sticky="ew", padx=10, pady=(5, 20)) # Angepasste Row und Padding
 
 
     def load_game_options(self):
@@ -455,7 +466,11 @@ class InputView(ctk.CTkFrame):
         """
         
         # --- 1. DIREKTE PUNKTE-AKTIONEN (müssen Detail-Dialog auslösen) ---
-        if action_name == "Kill":
+        if action_name == "Gegner Punkt":
+            self.process_final_action(executor_id=0, action_type="Gegner Punkt", result_type=None)
+            return
+        
+        elif action_name == "Kill":
             # Erstelle die Datenstruktur für den Detail-Checker
             result_data = {
                 "executor_id": executor_id,
