@@ -22,7 +22,8 @@ ACTION_TYPES = {
     'Zuspiel': ['Gut', 'Mittel',"Schlecht", 'Fehler'],
     'Angriff': ['Kill', 'Halber',"lob","smart","Gepritscht",  'Fehler', 'Blockiert'],
     'Aufschlag': ['Ass',"Halbes", 'Ins Feld', 'Fehler'],
-    'Block': ['Punkt', 'Fehler','Touch']
+    'Block': ['Punkt', 'Fehler','Touch'],
+    'Sicherung': ['Gut', 'Fehler']
 }
 
 POINT_FOR = {
@@ -46,6 +47,7 @@ POINT_DETAIL_OUTCOMES = {
     "Block": "BLOCK",
     "Sicherung Gegner": "OPP_SAVE",
     "Touch": "Touch",
+    "Fehler":"Fehler"
 }
 
 # --- NEU: Punktewertungen (Fallback/Direkt-Aktionen) ---

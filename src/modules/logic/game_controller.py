@@ -309,6 +309,8 @@ class GameController:
         """Holt die Details einer einzelnen Aktion zur Bearbeitung aus der DB."""
         return self.db_manager.get_action_data_by_id(action_id)
 
+    # src/modules/logic/game_controller.py (INNERHALB DER KLASSE GameController)
+
     def get_latest_actions(self, limit: int = 50, set_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Ruft die letzten Aktionen (maximal 'limit') für das aktuelle Spiel ab,
@@ -317,14 +319,14 @@ class GameController:
         if self._current_game_id is None:
             return []
 
-        # Basis-Query (holt Aktionen des aktuellen Spiels)
+        # KRITISCHE KORREKTUR: Verwende LEFT JOIN, um Aktionen mit executor_id=0 beizubehalten
         query = """
             SELECT 
                 a.action_id, a.action_type, a.result_type, a.executor_player_id, 
                 p.name AS executor_name, s.set_number, a.timestamp
             FROM actions a
             JOIN sets s ON a.set_id = s.set_id
-            JOIN players p ON a.executor_player_id = p.player_id
+            LEFT JOIN players p ON a.executor_player_id = p.player_id 
             WHERE s.game_id = ?
         """
         params = [self._current_game_id]

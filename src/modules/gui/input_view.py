@@ -285,7 +285,7 @@ class InputView(ctk.CTkFrame):
             
             
     def _create_header_and_actions(self, empty: bool = False):
-        """Erstellt Header und Aktionen im SELBEN Grid."""
+        """Erstellt Header und Aktionen im SELBEN Grid, inkl. Sicherung."""
         input_frame = self._action_input_frame
         
         # 1. Initiale Konfiguration des Grids (Bleibt gleich)
@@ -313,7 +313,7 @@ class InputView(ctk.CTkFrame):
 
         # --- 3. AKTIONEN-ZEILEN (Ab Row 1) ---
         
-        action_names = ["Zuspiel", "Angriff", "Kill", "Aufschlag", "Block"]
+        action_names = ["Zuspiel", "Angriff", "Kill", "Aufschlag", "Block", "Sicherung"] # <<< 'Sicherung' hinzugefügt
         
         for row_idx, action_name in enumerate(action_names):
             current_row = row_idx + 1
@@ -354,6 +354,8 @@ class InputView(ctk.CTkFrame):
         self.load_action_history()
 
 
+    # src/modules/gui/input_view.py (INNERHALB DER KLASSE InputView)
+
     def load_action_history(self):
         """Läd die letzten Aktionen aus der Datenbank und zeigt sie an."""
         
@@ -382,11 +384,19 @@ class InputView(ctk.CTkFrame):
             executor_name = action.get('executor_name', 'N/A')
             action_type = action.get('action_type')
             result_type = action.get('result_type')
-            # point_for fehlt in der Abfrage des GameControllers, daher nur Platzhalter.
+            
             point_display = "" 
 
-            # Zusammenfassung der Aktion
-            action_summary = f"[{set_num}] {executor_name} ({action_type}) -> {result_type or ''}"
+            # --- KORRIGIERTE LOGIK FÜR TEAM PUNKTE ---
+            if action_type == "Unser Punkt":
+                action_summary = f"[{set_num}] TEAM PUNKT (Wir)"
+                point_display = "-> OWN"
+            elif action_type == "Gegner Punkt":
+                action_summary = f"[{set_num}] GEGNER PUNKT (Fehler Wir)"
+                point_display = "-> OPP"
+            else:
+                # Normale Spieleraktion
+                action_summary = f"[{set_num}] {executor_name} ({action_type}) -> {result_type or ''}"
             
             # Frame für den Eintrag (enthält Label und Button)
             entry_frame = ctk.CTkFrame(self._history_frame, fg_color="transparent")
@@ -461,48 +471,30 @@ class InputView(ctk.CTkFrame):
     def handle_action(self, executor_id: int, action_name: str):
         """
         Sendet Aktionen entweder direkt oder über einen Dialog an den GameController.
-        Kritische Punkte-Aktionen (Kill, Block) umgehen den ActionDialog,
-        müssen aber den PointDetailDialog auslösen.
         """
         
-        # --- 1. DIREKTE PUNKTE-AKTIONEN (müssen Detail-Dialog auslösen) ---
-        if action_name == "Gegner Punkt":
-            self.process_final_action(executor_id=0, action_type="Gegner Punkt", result_type=None)
-            return
-        
-        elif action_name == "Kill":
-            # Erstelle die Datenstruktur für den Detail-Checker
-            result_data = {
-                "executor_id": executor_id,
-                "action_type": "Angriff", 
-                "result_type": "Kill",
-                "target_id": None
-            }
+        # --- 1. DIREKTE AKTIONEN, die den Detail-Dialog auslösen ---
+        if action_name == "Kill":
+            result_data = {"executor_id": executor_id, "action_type": "Angriff", "result_type": "Kill", "target_id": None}
             self.on_action_details_received(result_data)
             return
 
         elif action_name == "Block":
-            
-            
-            # Erstelle die Datenstruktur für den Detail-Checker
-            result_data = {
-                "executor_id": executor_id,
-                "action_type": "Block",
-                "result_type": "Punkt",
-                "target_id": None
-            }
-            self.on_action_details_received(result_data)
-            return
+            # Block wird jetzt IMMER über den ActionDialog verarbeitet (siehe unten)
+            pass 
 
-        # --- 2. SPEZIALFALL: Unser Punkt (geht direkt zur finalen Verarbeitung) ---
+        # --- 2. SPEZIALFALL: PUNKT-BUTTONS ---
         elif action_name == "Unser Punkt":
-            # Unser Punkt benötigt keine weiteren Details und löst den finalen Prozess aus
             self.process_final_action(executor_id=0, action_type="Unser Punkt", result_type=None)
             return
+
+        elif action_name == "Gegner Punkt":
+            self.process_final_action(executor_id=0, action_type="Gegner Punkt", result_type=None)
+            return
         
-        # --- 3. AKTIONEN MIT ZWISCHEN-DIALOG (Angriff, Aufschlag, Zuspiel) ---
-        if action_name in ["Angriff", "Aufschlag", "Zuspiel"]:
-            # Ruft den ActionDialog auf, dessen Callback on_action_details_received ist
+        # --- 3. AKTIONEN, die den ActionDialog erfordern ---
+        # Enthält jetzt Block und Sicherung
+        if action_name in ["Angriff", "Aufschlag", "Zuspiel", "Block", "Sicherung"]:
             self.show_result_dialog(executor_id, action_name)
             return
 
