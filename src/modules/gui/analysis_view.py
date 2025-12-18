@@ -2,15 +2,10 @@
 
 import customtkinter as ctk
 import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict
 from ..logic.statistic_calculator import StatisticCalculator 
 
 class AnalysisView(ctk.CTkFrame):
-    """
-    Ansicht zur Darstellung und Visualisierung der Volleyball-Statistiken.
-    """
     def __init__(self, master, app_controller, **kwargs):
         super().__init__(master, **kwargs)
         
@@ -24,221 +19,180 @@ class AnalysisView(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
-        # 1. Steuerung und Titel (Row 0)
-        control_frame = ctk.CTkFrame(self)
-        control_frame.grid(row=0, column=0, padx=10, pady=(20, 10), sticky="ew")
-        control_frame.grid_columnconfigure(0, weight=1)
-        control_frame.grid_columnconfigure(1, weight=3)
+        # --- HEADER ---
+        self.header = ctk.CTkFrame(self, fg_color="transparent")
+        self.header.grid(row=0, column=0, padx=20, pady=(20, 10), sticky="ew")
         
-        ctk.CTkLabel(control_frame, text="📊 Spiel-Analyse", font=ctk.CTkFont(size=24, weight="bold")).grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(self.header, text="📊 Performance Dashboard", 
+                     font=ctk.CTkFont(size=26, weight="bold")).pack(side="left")
 
-        # Spiel-Auswahl Dropdown
-        self.game_selection_var = ctk.StringVar(value="--- Spiel wählen ---")
-        self.game_selection_menu = ctk.CTkOptionMenu(control_frame, 
-                                                     values=["--- Spiel wählen ---"], 
-                                                     variable=self.game_selection_var,
-                                                     command=self.load_selected_game)
-        self.game_selection_menu.grid(row=0, column=1, padx=10, pady=5, sticky="e")
+        self.export_btn = ctk.CTkButton(self.header, text="📄 PDF Export", 
+                                        fg_color="#27ae60", hover_color="#219150",
+                                        command=self.export_report)
+        self.export_btn.pack(side="right", padx=10)
+
+        self.game_selection_var = ctk.StringVar(value="Spiel wählen...")
+        self.game_menu = ctk.CTkOptionMenu(self.header, variable=self.game_selection_var,
+                                           command=self.load_selected_game, width=200)
+        self.game_menu.pack(side="right")
+
+        # --- TABS ---
+        self.tabview = ctk.CTkTabview(self, segmented_button_selected_color="#3498db")
+        self.tabview.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
         
-        # 2. Haupt-Inhaltsbereich (Row 1)
-        self.analysis_frame = ctk.CTkScrollableFrame(self)
-        self.analysis_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
-        self.analysis_frame.grid_columnconfigure(0, weight=1)
+        self.tab_players = self.tabview.add("👤 Spieler")
+        self.tab_combinations = self.tabview.add("🏐 Kombinationen")
+        self.tab_settings = self.tabview.add("📈 Zuspiel-Verteilung")
 
         self.load_game_options()
-        self.display_analysis(self.current_game_id) 
+        if self.current_game_id:
+            self.display_analysis(self.current_game_id)
 
     def load_game_options(self):
-        """Lädt alle Spiele aus der DB und füllt das Dropdown."""
         all_games = self.db_manager.get_all_games()
+        if not all_games: return
         
-        if not all_games:
-            self.game_selection_menu.configure(values=["Keine Spiele gefunden"])
-            return
-
         options = []
-        first_game_id: Optional[int] = None
-
-        for game_id, date_time, home_name, guest_name in all_games:
-            # Format: [Datum] Heimname vs. Gastname
-            display_name = f"[{date_time[:10]}] {home_name} vs. {guest_name}"
-            options.append(display_name)
-            self.game_options[display_name] = game_id
-            
-            if first_game_id is None:
-                first_game_id = game_id
-
-        self.game_selection_menu.configure(values=options)
+        for g_id, date_time, home, guest in all_games:
+            name = f"[{date_time[:10]}] {home} vs. {guest}"
+            options.append(name)
+            self.game_options[name] = g_id
         
+        self.game_menu.configure(values=options)
         if options:
             self.game_selection_var.set(options[0])
-            self.current_game_id = first_game_id
-        else:
-            self.game_selection_var.set("Keine Spiele gefunden")
-
+            self.current_game_id = self.game_options[options[0]]
 
     def load_selected_game(self, selection):
-        """Wird aufgerufen, wenn im Dropdown ein Spiel ausgewählt wird."""
-        game_id = self.game_options.get(selection)
-        
-        if game_id:
-            self.current_game_id = game_id
-            self.display_analysis(game_id)
+        self.current_game_id = self.game_options.get(selection)
+        self.display_analysis(self.current_game_id)
 
+    def display_analysis(self, game_id: int):
+        # Clearen
+        for tab in [self.tab_players, self.tab_combinations, self.tab_settings]:
+            for child in tab.winfo_children(): child.destroy()
 
-    def clear_analysis_frame(self):
-        """Löscht alle Widgets im Analyse-Frame."""
-        for widget in self.analysis_frame.winfo_children():
-            widget.destroy()
+        self.render_player_cards(game_id)
+        self.render_combination_analysis(game_id)
+        self.render_setting_distribution(game_id)
 
+    def render_player_cards(self, game_id: int):
+        """Dashboard mit sortierten Karten. Blocks sind nun in 'Defensive'."""
+        df = self.stats_calculator.calculate_player_general_stats(game_id)
+        if df.empty: return
 
-    def display_analysis(self, game_id: Optional[int]):
-        """Zentrale Funktion zur Anzeige aller Statistiken."""
-        self.clear_analysis_frame()
-        
-        if not game_id:
-            ctk.CTkLabel(self.analysis_frame, text="Bitte ein Spiel zur Analyse auswählen.").grid(row=0, column=0, padx=20, pady=20)
-            return
+        # Ranking nach Gesamtpunkten
+        df = df.sort_values(by="Gesamtpunkte", ascending=False)
+        scroll = ctk.CTkScrollableFrame(self.tab_players, fg_color="transparent")
+        scroll.pack(fill="both", expand=True, padx=5, pady=5)
+        scroll.grid_columnconfigure((0, 1), weight=1)
+
+        for i, (_, row) in enumerate(df.iterrows()):
+            p_id = int(row['executor_player_id'])
+            name = self.db_manager.get_player_name_by_id(p_id)
             
-        row_counter = 0
-        
-        # 1. Spielerzusammenfassung (Anforderung 1 & 2)
-        row_counter = self.show_player_summary(game_id, start_row=row_counter)
-        
-        # 2. Zuspielverteilung (Anforderung 3)
-        self.show_setting_distribution(game_id, start_row=row_counter)
-
-
-    # --- 1. SPIELERZUSAMMENFASSUNG & SERVICE RATE ---
-
-    def show_player_summary(self, game_id: int, start_row: int):
-        """
-        Zeigt alle wichtigen Statistiken pro Spieler an und filtert 0-Werte heraus.
-        """
-        
-        # 1. Daten aggregieren
-        summary_df = self.stats_calculator.calculate_player_general_stats(game_id)
-        
-        if summary_df.empty:
-            ctk.CTkLabel(self.analysis_frame, text="Keine Aktionen von Spielern erfasst.").grid(row=start_row, column=0, padx=10, pady=10, sticky="w")
-            return current_row + 1
-
-        # 2. Spieler-Namen für die Anzeige
-        player_names = self.app_controller.get_game_controller().get_all_players() 
-        
-        # Sortiere das DataFrame nach Kills abwärts
-        summary_df = summary_df.sort_values(by=['Kills'], ascending=False)
-        
-        current_row = start_row
-        
-        ctk.CTkLabel(self.analysis_frame, text="--- Spieler-Zusammenfassung ---", font=ctk.CTkFont(weight="bold")).grid(row=current_row, column=0, padx=10, pady=(10, 5), sticky="w")
-        current_row += 1
-
-        for _, row in summary_df.iterrows():
-            player_id = int(row['executor_player_id'])
-            name = player_names.get(player_id, f"ID {player_id} (Unbekannt)")
+            card = ctk.CTkFrame(scroll, border_width=2, border_color="#3d3d3d", corner_radius=15)
+            card.grid(row=i//2, column=i%2, padx=12, pady=12, sticky="nsew")
             
-            # --- ZUSAMMENFASSUNG ERSTELLEN (FILTERING VON 0-WERTEN) ---
+            # --- Header: Name & Effizienz ---
+            header = ctk.CTkFrame(card, fg_color="transparent")
+            header.pack(fill="x", padx=15, pady=(15, 5))
+            ctk.CTkLabel(header, text=name, font=ctk.CTkFont(size=20, weight="bold")).pack(side="left")
             
-            stats_list = []
-            
-            # 1. Angriffseffizienz (nur anzeigen, wenn Angriffe vorhanden sind)
-            if row['Angriffe Gesamt'] > 0:
-                eff_display = f"Effizienz: {row['Angriffseffizienz'] * 100:.1f}% ({int(row['Kills'])}K - {int(row['Angriffsfehler'])}F)"
-                stats_list.append(eff_display)
-            
-            # 2. Aufschlag Quote (nur anzeigen, wenn Aufschläge vorhanden sind)
-            if row['Aufschläge Gesamt'] > 0:
-                service_data = self.stats_calculator.calculate_service_rate(game_id, player_id)
-                rate_display = (f"Aufschlagquote: {service_data['rate'] * 100:.1f}% "
-                                f"({service_data['aces']}/{service_data['total_serves']} Asse/Gesamt)")
-                stats_list.append(rate_display)
-            
-            # 3. Weitere Stats filtern (Werte ungleich 0 ausgeben)
-            stat_mapping = {
-                'Blockpunkte': 'Blockpunkte',
-                'Aufschlagfehler': 'Aufschlagfehler',
-            }
-            
-            for col, display_name in stat_mapping.items():
-                if row[col] != 0:
-                    stats_list.append(f"{display_name}: {int(row[col])}")
-            
-            
-            # Zusammenfassen und anzeigen
-            if stats_list:
-                summary_text = "\n".join(stats_list)
-                
-                # Header für den Spieler
-                ctk.CTkLabel(self.analysis_frame, 
-                             text=f"*** {name} ***", 
-                             font=ctk.CTkFont(weight="bold")).grid(row=current_row, column=0, padx=10, pady=(10, 0), sticky="w")
-                current_row += 1
-                
-                # Details
-                ctk.CTkLabel(self.analysis_frame, 
-                             text=summary_text, 
-                             justify="left").grid(row=current_row, column=0, padx=20, pady=(0, 5), sticky="w")
-                current_row += 1
+            # Effizienz-Badge
+            eff = row['Angriffseffizienz'] * 100
+            color = "#2ecc71" if eff > 25 else "#e67e22" if eff > 0 else "#e74c3c"
+            badge = ctk.CTkFrame(header, fg_color=color, corner_radius=8)
+            badge.pack(side="right")
+            ctk.CTkLabel(badge, text=f"{eff:.1f}% Eff.", text_color="white", font=ctk.CTkFont(size=12, weight="bold")).pack(padx=8, pady=2)
 
-        return current_row # Gebe die nächste freie Reihe zurück
+            # Trennlinie
+            ctk.CTkFrame(card, height=2, fg_color="#3d3d3d").pack(fill="x", padx=15, pady=5)
 
+            # --- Statistik-Bereich ---
+            stats_container = ctk.CTkFrame(card, fg_color="transparent")
+            stats_container.pack(fill="x", padx=10, pady=5)
 
-    # --- 2. ZUSPIELVERTEILUNG (KACHEL-ANSICHT) ---
+            # Kategorie 1: Übersicht (Punkte & NEU: Gesamtfehler)
+            group_summary = self._create_stat_group(stats_container, "📊 ÜBERSICHT")
+            self._add_stat_item(group_summary, "Punkte", int(row['Gesamtpunkte']), "#3498db")
+            self._add_stat_item(group_summary, "Gesamtfehler", int(row['Gesamtfehler']), "#e74c3c")
 
-    def show_setting_distribution(self, game_id: int, start_row: int):
-        """
-        Berechnet und zeigt die Zuspielverteilung pro Zuspieler in separaten Boxen an.
-        """
-        
-        distribution_df: pd.DataFrame = self.stats_calculator.calculate_setting_distribution(game_id) 
-        
-        if distribution_df.empty:
-            ctk.CTkLabel(self.analysis_frame, text="Keine Zuspiel-Daten vorhanden.").grid(row=start_row, column=0, padx=10, pady=(20, 10), sticky="w")
+            # Kategorie 2: Offensive (Kills, Angriffsfehler, Versuche)
+            group_offense = self._create_stat_group(stats_container, "⚔️ OFFENSIVE")
+            self._add_stat_item(group_offense, "Kills", int(row['Kills']))
+            self._add_stat_item(group_offense, "A-Fehler", int(row['Angriffsfehler']))
+            self._add_stat_item(group_offense, "Angriffe", int(row['Angriffe_Gesamt']))
+
+            # Kategorie 3: Defensive & Aufschläge
+            group_bottom = self._create_stat_group(stats_container, "🛡️ DEF & 🚀 SERVICE")
+            self._add_stat_item(group_bottom, "Blocks", int(row['Blockpunkte']), "#27ae60")
+            self._add_stat_item(group_bottom, "Asse", int(row['Asse']), "#f1c40f")
+            self._add_stat_item(group_bottom, "S-Quote %", f"{row['Service_Error_Rate']*100:.0f}%")
+
+    def _create_stat_group(self, parent, title):
+        group_frame = ctk.CTkFrame(parent, fg_color="#2b2b2b", corner_radius=10)
+        group_frame.pack(fill="x", pady=5, padx=5)
+        ctk.CTkLabel(group_frame, text=title, font=ctk.CTkFont(size=10, weight="bold"), 
+                     text_color="gray").pack(pady=(5, 0))
+        inner_stats = ctk.CTkFrame(group_frame, fg_color="transparent")
+        inner_stats.pack(fill="x", pady=5)
+        return inner_stats
+
+    def _add_stat_item(self, parent, label, value, color="white"):
+        item = ctk.CTkFrame(parent, fg_color="transparent")
+        item.pack(side="left", expand=True)
+        ctk.CTkLabel(item, text=str(value), font=ctk.CTkFont(size=15, weight="bold"), 
+                     text_color=color).pack()
+        ctk.CTkLabel(item, text=label, font=ctk.CTkFont(size=9), text_color="gray").pack()
+            
+    def render_combination_analysis(self, game_id: int):
+        """Zeigt, wie effektiv Zuspieler-Angreifer-Paare sind."""
+        df = self.stats_calculator.calculate_setter_attacker_efficiency(game_id)
+        if df.empty:
+            ctk.CTkLabel(self.tab_combinations, text="Keine Kombinations-Daten").pack(pady=20)
             return
 
-        current_row = start_row
-        ctk.CTkLabel(self.analysis_frame, text="--- Zuspiel-Verteilung Pro Spieler ---", font=ctk.CTkFont(weight="bold")).grid(row=current_row, column=0, padx=10, pady=(20, 10), sticky="w")
-        current_row += 1
+        ctk.CTkLabel(self.tab_combinations, text="Beste Duos (Zuspieler ➔ Angreifer)", 
+                     font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
 
-        # 1. Gruppiere nach Zuspieler
-        setters = distribution_df['Zuspieler'].unique()
-        
-        # Erstelle ein Container-Frame für die Setter-Boxen (das Grid, in dem die Boxen liegen)
-        setter_container = ctk.CTkFrame(self.analysis_frame, fg_color="transparent")
-        setter_container.grid(row=current_row, column=0, sticky="ew", padx=10, pady=5)
-        
-        # Konfiguriere das interne Grid des Containers (3 Spalten)
-        setter_container.grid_columnconfigure((0, 1, 2), weight=1) 
-        
-        frame_col = 0
-        frame_row = 0 # Innere Reihe des Containers
-        
-        for idx, setter_name in enumerate(setters):
-            setter_data = distribution_df[distribution_df['Zuspieler'] == setter_name].sort_values(by='Total', ascending=False)
+        for _, row in df.sort_values("Efficiency", ascending=False).iterrows():
+            frame = ctk.CTkFrame(self.tab_combinations)
+            frame.pack(fill="x", padx=20, pady=5)
             
-            # Frame für den einzelnen Zuspieler (Die "Box")
-            setter_frame = ctk.CTkFrame(setter_container)
-            setter_frame.grid(row=frame_row, column=frame_col, sticky="nsew", padx=5, pady=5)
-            setter_frame.grid_columnconfigure(0, weight=1) 
+            txt = f"{row['Zuspieler']} ➔ {row['Angreifer']}"
+            ctk.CTkLabel(frame, text=txt, width=250, anchor="w").pack(side="left", padx=10)
             
-            # Titel
-            total_attempts = setter_data['Total'].sum()
-            ctk.CTkLabel(setter_frame, 
-                         text=f"*** {setter_name} ({total_attempts} Vers.) ***", 
-                         font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=(5, 2), sticky="w")
+            # Fortschrittsbalken für Effizienz
+            bar = ctk.CTkProgressBar(frame, width=150)
+            bar.pack(side="left", padx=10)
+            bar.set(max(0, min(1, row['Efficiency'] / 100)))
+            
+            ctk.CTkLabel(frame, text=f"{row['Efficiency']}% Effizienz ({row['Total']} Vers.)").pack(side="right", padx=10)
 
-            # Details
-            detail_row = 1
-            for _, target_row in setter_data.iterrows():
-                # Ausgabe der Verteilung
-                text = (f"  -> {target_row['Angreifer']}: {target_row['Total']}x "
-                        f"({target_row['Prozent']:.1f}%)")
-                        
-                ctk.CTkLabel(setter_frame, text=text, justify="left", anchor="w").grid(row=detail_row, column=0, padx=15, pady=(0, 2), sticky="w")
-                detail_row += 1
+    def render_setting_distribution(self, game_id: int):
+        """Die klassische Zuspielverteilung."""
+        df = self.stats_calculator.calculate_setting_distribution(game_id)
+        if df.empty: return
+        
+        for setter in df['Zuspieler'].unique():
+            f = ctk.CTkFrame(self.tab_settings)
+            f.pack(fill="x", padx=20, pady=10)
+            ctk.CTkLabel(f, text=f"Setter: {setter}", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10)
+            
+            for _, r in df[df['Zuspieler'] == setter].iterrows():
+                lbl = f"  ➔ {r['Angreifer']}: {r['Prozent']}% ({r['Total']}x)"
+                ctk.CTkLabel(f, text=lbl).pack(anchor="w", padx=20)
 
-            frame_col += 1
-            if frame_col >= 3: # Neue Reihe nach 3 Spalten
-                frame_col = 0
-                frame_row += 1
+    def _add_stat(self, parent, label, value):
+        f = ctk.CTkFrame(parent, fg_color="#808080", corner_radius=5)
+        f.pack(side="left", expand=True, fill="both", padx=2)
+        ctk.CTkLabel(f, text=label, font=ctk.CTkFont(size=10)).pack()
+        ctk.CTkLabel(f, text=str(value), font=ctk.CTkFont(size=14, weight="bold")).pack()
+
+    def export_report(self):
+        if not self.current_game_id: return
+        path = ctk.filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
+        if path:
+            if self.stats_calculator.export_to_pdf(self.current_game_id, path):
+                print(f"Exportiert nach {path}")
