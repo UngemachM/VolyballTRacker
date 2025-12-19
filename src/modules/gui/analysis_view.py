@@ -65,9 +65,6 @@ class AnalysisView(ctk.CTkFrame):
         self.render_player_cards(game_id)
         self.render_combination_analysis(game_id)
         self.render_setting_distribution(game_id)
-# src/modules/gui/analysis_view.py
-
-# ... (__init__ etc bleiben gleich) ...
 
     def render_player_cards(self, game_id: int):
         df = self.stats_calculator.calculate_player_general_stats(game_id)
@@ -85,12 +82,10 @@ class AnalysisView(ctk.CTkFrame):
             card = ctk.CTkFrame(scroll, border_width=2, border_color="#3d3d3d", corner_radius=15)
             card.grid(row=i//2, column=i%2, padx=12, pady=12, sticky="nsew")
             
-            # Header
             header = ctk.CTkFrame(card, fg_color="transparent")
             header.pack(fill="x", padx=15, pady=(15, 5))
             ctk.CTkLabel(header, text=name, font=ctk.CTkFont(size=20, weight="bold")).pack(side="left")
             
-            # Status Badge (Nutzt Gesamtquote)
             eff = row['Gesamtquote'] * 100
             color = "#2ecc71" if eff > 20 else "#e67e22" if eff > 0 else "#e74c3c"
             badge = ctk.CTkFrame(header, fg_color=color, corner_radius=8)
@@ -101,23 +96,26 @@ class AnalysisView(ctk.CTkFrame):
             stats_container = ctk.CTkFrame(card, fg_color="transparent")
             stats_container.pack(fill="x", padx=10, pady=5)
 
-            # --- 📊 TOTAL ---
+            # 📊 TOTAL
             group_total = self._create_stat_group(stats_container, "📊 TOTAL")
             self._add_stat_item(group_total, "Punkte", f"{row['Gesamtpunkte']:.1f}", "#3498db")
             self._add_stat_item(group_total, "Fehler", int(row['Gesamtfehler']), "#e74c3c")
+            self._add_stat_item(group_total, "Versuche", int(row['Gesamtversuche']))
             self._add_stat_item(group_total, "Blocks", int(row['Blocks']), "#27ae60")
-
-            # --- ⚔️ ANGRIFF ---
+            # ⚔️ ANGRIFF
             group_atk = self._create_stat_group(stats_container, "⚔️ ANGRIFF")
-            self._add_stat_item(group_atk, "Kills", int(row['Kills']))
-            self._add_stat_item(group_atk, "A-Fehler", int(row['Angriffsfehler']))
-            self._add_stat_item(group_atk, "Quote %", f"{row['Angriffsquote']*100:.1f}%")
+            self._add_stat_item(group_atk, "Kills", int(row['Kills']), "#2ecc71")
+            self._add_stat_item(group_atk, "Fehler", int(row['Angriffsfehler']), "#e74c3c")
+            self._add_stat_item(group_atk, "A-Quote %", f"{row['Angriffsquote']*100:.1f}%")
+            self._add_stat_item(group_atk, "Versuche", int(row['Angriffe_Gesamt']))
 
-            # --- 🚀 AUFSCHLAG ---
+            # 🚀 AUFSCHLAG
             group_srv = self._create_stat_group(stats_container, "🚀 AUFSCHLAG")
             self._add_stat_item(group_srv, "S-Punkte", f"{row['Aufschlag_Punkte']:.1f}", "#f1c40f")
+            self._add_stat_item(group_srv, "S-Fehler", int(row['Aufschlagfehler']), "#e74c3c")
             self._add_stat_item(group_srv, "In-Feld %", f"{row['Ins_Feld_Quote']*100:.1f}%")
             self._add_stat_item(group_srv, "S-Effekt %", f"{row['Aufschlagsquote']*100:.1f}%")
+            self._add_stat_item(group_srv, "Versuche", int(row['Aufschläge_Gesamt']))
 
     def _create_stat_group(self, parent, title):
         group_frame = ctk.CTkFrame(parent, fg_color="#2b2b2b", corner_radius=10)
